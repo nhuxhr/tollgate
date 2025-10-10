@@ -64,7 +64,7 @@ pub struct AccountCrank<'info> {
         payer = payer,
         associated_token::mint = quote_mint,
         associated_token::authority = owner,
-        associated_token::token_program = associated_token_program,
+        associated_token::token_program = quote_program,
     )]
     pub treasury: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
@@ -74,7 +74,7 @@ pub struct AccountCrank<'info> {
         payer = payer,
         associated_token::mint = base_mint,
         associated_token::authority = owner,
-        associated_token::token_program = associated_token_program,
+        associated_token::token_program = base_program,
     )]
     pub base_account: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
@@ -84,7 +84,7 @@ pub struct AccountCrank<'info> {
         payer = payer,
         associated_token::mint = quote_mint,
         associated_token::authority = owner,
-        associated_token::token_program = associated_token_program,
+        associated_token::token_program = quote_program,
     )]
     pub quote_account: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
@@ -113,7 +113,7 @@ pub struct AccountCrank<'info> {
         mut,
         associated_token::mint = quote_mint,
         associated_token::authority = policy.creator,
-        associated_token::token_program = associated_token_program,
+        associated_token::token_program = quote_program,
     )]
     pub creator_accoount: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
