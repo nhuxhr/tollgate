@@ -45,11 +45,15 @@ impl InitializeParams {
 }
 
 pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> Result<()> {
+    msg!("Initialize::Starting initialization with params: init_investor_ata={}, investor_fee_share_bps={}, min_payout_lamports={}, daily_cap={:?}, y0={}", 
+         params.init_investor_ata, params.investor_fee_share_bps, params.min_payout_lamports, params.daily_cap, params.y0);
+
     // Validate the initialize parameters
     params.assert()?;
 
     // Load the pool and pool config accounts
     let (base_mint, quote_mint) = {
+        msg!("Initialize::Loading pool and pool config accounts");
         // Load pool and pool config accounts
         let pool = ctx.accounts.pool.load()?;
         let pool_cfg = ctx.accounts.pool_cfg.load()?;
@@ -68,6 +72,7 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
     };
 
     // Initialize the policy account
+    msg!("Initialize::Initializing policy account");
     let policy = &mut ctx.accounts.policy;
     policy.initialize(
         ctx.accounts.vault.key(),
@@ -79,6 +84,7 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
     )?;
 
     // Initialize the progress account
+    msg!("Initialize::Initializing progress account");
     let progress = &mut ctx.accounts.progress;
     progress.initialize(ctx.accounts.vault.key(), ctx.bumps.progress)?;
 
@@ -118,6 +124,7 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
         y0: params.y0,
     });
 
+    msg!("Initialize::Initialization completed successfully");
     Ok(())
 }
 

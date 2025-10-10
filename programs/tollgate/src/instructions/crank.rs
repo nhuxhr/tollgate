@@ -31,6 +31,12 @@ pub fn crank<'info>(
     ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
     params: CrankParams,
 ) -> Result<()> {
+    msg!(
+        "Crank::Starting crank with cursor={} and page_size={}",
+        params.cursor,
+        params.page_size
+    );
+
     let policy = &mut ctx.accounts.policy;
     let progress = &mut ctx.accounts.progress;
     let clock = Clock::get()?;
@@ -53,6 +59,7 @@ pub fn crank<'info>(
     // Validate progress cursor
     if params.cursor < progress.cursor {
         // Idempotent: nothing to do
+        msg!("Crank::Cursor behind progress, skipping");
         return Ok(());
     } else if params.cursor > progress.cursor {
         // Cannot skip ahead
@@ -60,6 +67,7 @@ pub fn crank<'info>(
     }
 
     if investors.saturating_sub(params.cursor) == 0 {
+        msg!("Crank::No investors to process, exiting");
         return Ok(());
     }
 
@@ -79,6 +87,8 @@ pub fn crank<'info>(
         // Should not happen
         return Err(TollgateError::InvalidDayState.into());
     };
+
+    msg!("Crank::Processing day state: {:?}", day);
 
     // Load pool and position accounts
     let pool = &ctx.accounts.pool.load()?;
@@ -156,7 +166,10 @@ pub fn crank<'info>(
             };
 
             // Claim DAMM v2 position fee
-            msg!("Crank::Claiming DAMM v2 position fee");
+            msg!(
+                "Crank::Claiming DAMM v2 position fee: quote_fee={}",
+                quote_fee
+            );
             damm_v2::cpi::claim_position_fee(CpiContext::new(
                 ctx.accounts.amm_program.to_account_info(),
                 damm_v2::cpi::accounts::ClaimPositionFee {
@@ -196,14 +209,25 @@ pub fn crank<'info>(
         progress.carry
     };
 
+    msg!("Crank::Distributable amount after carry: {}", distributable);
+
     // Optional daily cap
     if let Some(cap) = policy.daily_cap {
         let remaining_cap = cap.saturating_sub(progress.daily_spent);
         distributable = distributable.min(remaining_cap);
+        msg!(
+            "Crank::Applied daily cap, remaining_cap={}, distributable={}",
+            remaining_cap,
+            distributable
+        );
     }
 
     if distributable < policy.min_payout_lamports {
         progress.carry = distributable;
+        msg!(
+            "Crank::Distributable below min payout, carrying over: {}",
+            distributable
+        );
         return Ok(());
     }
 
@@ -228,6 +252,13 @@ pub fn crank<'info>(
     let f_locked = (locked_total * MAX_BPS as u64) / policy.y0;
     let eligible_investor_share_bps = (policy.investor_fee_share_bps as u64).min(f_locked);
     let investor_fee_quote = distributable * eligible_investor_share_bps / MAX_BPS as u64;
+
+    msg!(
+        "Crank::Locked total: {}, eligible bps: {}, investor fee: {}",
+        locked_total,
+        eligible_investor_share_bps,
+        investor_fee_quote
+    );
 
     let page_start = (params.cursor / 2) as usize;
     let page_end = (page_start + params.page_size as usize).min(investors as usize);
@@ -302,6 +333,13 @@ pub fn crank<'info>(
     progress.daily_spent += page_payouts;
     progress.cursor += ((page_end - page_start) as u32) * 2;
 
+    msg!(
+        "Crank::Processed page {} to {}, payouts: {}",
+        page_start,
+        page_end,
+        page_payouts
+    );
+
     emit!(InvestorPayoutPage {
         vault: policy.vault,
         policy: policy.key(),
@@ -330,8 +368,13 @@ pub fn crank<'info>(
                 vault_signer,
             );
             anchor_spl::token_interface::transfer(cpi_ctx, creator_share)?;
+            msg!("Crank::Transferred creator share: {}", creator_share);
         } else {
             progress.carry += creator_share;
+            msg!(
+                "Crank::Creator share below min, carrying over: {}",
+                creator_share
+            );
         }
 
         emit!(CreatorPayoutDayClosed {
@@ -346,7 +389,14 @@ pub fn crank<'info>(
             creator_payout: creator_share,
             carry: progress.carry
         });
+
+        msg!(
+            "Crank::Day closed, total distributed: {}, carry: {}",
+            distributable,
+            progress.carry
+        );
     }
 
+    msg!("Crank::Completed successfully");
     Ok(())
 }
