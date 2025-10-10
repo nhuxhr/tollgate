@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use anchor_lang::{prelude::*, solana_program::borsh::try_from_slice_unchecked};
 use anchor_spl::{associated_token::get_associated_token_address, token, token_interface};
 use streamflow_sdk::state::Contract;
