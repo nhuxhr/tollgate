@@ -12,8 +12,7 @@ use anchor_spl::{
 use tollgate::{
     accounts::AccountCrank,
     constants::{
-        damm_v2_constants::{self, pool_authority},
-        INVESTOR_FEE_POS_OWNER, POLICY_SEED, PROGRESS_SEED, VAULT_SEED,
+        damm_v2_constants, INVESTOR_FEE_POS_OWNER, POLICY_SEED, PROGRESS_SEED, VAULT_SEED,
     },
     state::Policy,
 };

@@ -14,7 +14,7 @@ pub const VAULT_SEED: &[u8] = b"vault";
 #[constant]
 pub const INVESTOR_FEE_POS_OWNER: &[u8] = b"investor_fee_pos_owner";
 
-/// DAMM constants
+/// DAMM v2 constants
 pub mod damm_v2_constants {
     pub mod seeds {
         pub const CONFIG_PREFIX: &[u8] = b"config";

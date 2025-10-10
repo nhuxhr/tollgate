@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs,
     path::Path,
-    str::FromStr,
     sync::{Mutex, MutexGuard},
     time::Duration,
 };
@@ -38,7 +37,7 @@ use litesvm::{
     LiteSVM,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{from_str, Value};
+use serde_json::from_str;
 use solana_clock::Clock;
 
 use crate::constants::{SOL_MINT, USDC_MINT};

@@ -45,13 +45,10 @@ impl InitializeParams {
 }
 
 pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> Result<()> {
-    let policy = &mut ctx.accounts.policy;
-    let progress = &mut ctx.accounts.progress;
-
-    // Validate params
+    // Validate the initialize parameters
     params.assert()?;
 
-    // Scope the pool and pool_cfg loads tightly to avoid borrow conflicts during CPI
+    // Load the pool and pool config accounts
     let (base_mint, quote_mint) = {
         // Load pool and pool config accounts
         let pool = ctx.accounts.pool.load()?;
@@ -70,7 +67,8 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
         (base_mint, quote_mint)
     };
 
-    // Initialize Policy
+    // Initialize the policy account
+    let policy = &mut ctx.accounts.policy;
     policy.initialize(
         ctx.accounts.vault.key(),
         ctx.accounts.pool.load()?.creator,
@@ -80,10 +78,11 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
         ctx.bumps.policy,
     )?;
 
-    // Initialize Progress
+    // Initialize the progress account
+    let progress = &mut ctx.accounts.progress;
     progress.initialize(ctx.accounts.vault.key(), ctx.bumps.progress)?;
 
-    // Create DAMM v2 position
+    // Create a DAMM v2 position
     msg!("Initialize::Creating DAMM v2 position");
     damm_v2::cpi::create_position(CpiContext::new(
         ctx.accounts.amm_program.to_account_info(),
@@ -102,7 +101,7 @@ pub fn initialize(ctx: Context<AccountInitialize>, params: InitializeParams) -> 
         },
     ))?;
 
-    // Emit HonoraryPositionInitialized event
+    // Emit a HonoraryPositionInitialized event
     emit!(HonoraryPositionInitialized {
         vault: ctx.accounts.vault.key(),
         policy: ctx.accounts.policy.key(),
