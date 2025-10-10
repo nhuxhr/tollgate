@@ -4,6 +4,7 @@
 
 - [Tollgate Program](#tollgate-program)
   - [Introduction](#introduction)
+    - [Testing](#testing)
   - [Integration Steps](#integration-steps)
     - [Overview](#overview)
     - [Step 1: Initialize](#step-1-initialize)
@@ -17,6 +18,7 @@
     - [Pagination Cursor](#pagination-cursor)
     - [Page Size](#page-size)
     - [Page Payouts](#page-payouts)
+    - [Crank Flow Diagram](#crank-flow-diagram)
     - [Pagination Flow Diagram](#pagination-flow-diagram)
   - [Events](#events) - [HonoraryPositionInitialized](#honorarypositioninitialized) - [QuoteFeesClaimed](#quotefeesclaimed) - [InvestorPayoutPage](#investorpayoutpage) - [CreatorPayoutDayClosed](#creatorpayoutdayclosed)
 
@@ -25,6 +27,29 @@
 ## Introduction
 
 The Tollgate program is designed to work with the DAMM v2 protocol, allowing for the creation of honorary positions and the distribution of fees to investors. This program is built for the Superteam bounty: Build Permissionless Fee Routing Anchor Program for Meteora DLMM v2 (see <https://earn.superteam.fun/listing/build-permissionless-fee-routing-anchor-program-for-meteora-dlmm-v2> for details).
+
+### Testing
+
+To test the Tollgate program, run the following command:
+
+```bash
+anchor test
+```
+
+The `test.sh` script is used to dump the necessary programs and accounts required for testing. The dumped programs include:
+
+- `spl_token`
+- `spl_token_2022`
+- `spl_ata`
+- `damm_v2`
+- `streamflow`
+
+The dumped accounts include:
+
+- Pool configuration accounts
+- Treasury account
+
+These dumped programs and accounts are then loaded into the LiteSVM context in the `svm.rs` file. The LiteSVM context is used to simulate the Solana blockchain and execute the tests.
 
 ## Integration Steps
 
