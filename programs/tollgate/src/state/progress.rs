@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{constants::TWENTY_FOUR_HOURS, error::TollgateError};
 
-#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, PartialEq)]
+#[derive(Debug, AnchorSerialize, AnchorDeserialize, InitSpace, Clone, PartialEq)]
 pub enum DayState {
     New,    // New day, no distributions yet
     Same,   // Same day, distributions ongoing
@@ -10,7 +10,7 @@ pub enum DayState {
 }
 
 #[account]
-#[derive(InitSpace)]
+#[derive(Debug, InitSpace)]
 pub struct Progress {
     pub vault: Pubkey,             // Associated vault
     pub last_distribution_ts: i64, // Timestamp of last distribution

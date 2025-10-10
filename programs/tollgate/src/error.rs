@@ -59,6 +59,8 @@ pub enum TollgateError {
     PaginationCursorTooSmall,
     #[msg("Pagination cursor is too large")]
     PaginationCursorTooLarge,
+    #[msg("Cursor exceeds the number of investors")]
+    CursorExceedsInvestors,
 
     // Initialization errors
     #[msg("The provided policy has already been initialized")]

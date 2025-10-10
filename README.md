@@ -255,6 +255,7 @@ The Tollgate program uses the following error codes:
 | InvalidY0Allocation        | Invalid parameters        | The Y0 allocation is invalid.                                         |
 | PaginationCursorTooSmall   | Invalid parameters        | The pagination cursor is too small.                                   |
 | PaginationCursorTooLarge   | Invalid parameters        | The pagination cursor is too large.                                   |
+| CursorExceedsInvestors     | Invalid parameters        | Cursor exceeds the number of investors.                               |
 | PolicyAlreadyInitialized   | Initialization errors     | The policy account has already been initialized.                      |
 | ProgressAlreadyInitialized | Initialization errors     | The progress account has already been initialized.                    |
 

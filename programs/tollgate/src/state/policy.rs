@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use crate::{constants::MAX_BPS, error::TollgateError, instructions::InitializeParams};
 
 #[account]
-#[derive(InitSpace)]
+#[derive(Debug, InitSpace)]
 pub struct Policy {
     pub vault: Pubkey,               // Associated vault
     pub creator: Pubkey,             // Creator pubkey that receives remainder

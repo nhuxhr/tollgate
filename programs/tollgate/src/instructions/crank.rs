@@ -21,7 +21,7 @@ impl CrankParams {
         // assert cursor is not excessively investors
         require!(
             self.cursor < investors,
-            TollgateError::PaginationCursorTooLarge
+            TollgateError::CursorExceedsInvestors
         );
         Ok(())
     }
