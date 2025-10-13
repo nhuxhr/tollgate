@@ -74,7 +74,7 @@ pub fn ensure_token(
 fn test_01_create_tollgate_token() {
     let mut ctx = TestContext::default();
     let key = String::from("tollgate");
-    let amount = 10_000_000_000;
+    let amount = 1000 * LAMPORTS_PER_SOL;
     let quote_mint = SOL_MINT;
     let pool_config = pubkey!("EQbqYxecZuJsVt6g5QbKTWpNWa3QyWQE5NWz5AZBAiNv");
     let (creator, base_mint, creator_ata) =
@@ -86,7 +86,7 @@ fn test_01_create_tollgate_token() {
     let token = ctx.tokens.get(&key).expect("");
     let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
     let pool_params = prepare_pool_creation_params(
-        2 * 10 * 9,
+        10 * LAMPORTS_PER_SOL,
         10 * LAMPORTS_PER_SOL,
         MIN_SQRT_PRICE,
         MAX_SQRT_PRICE,
@@ -135,7 +135,7 @@ fn test_01_create_tollgate_token() {
     )
     .expect("");
 
-    let investors_rand = rand_investors_num(10..16);
+    let investors_rand = rand_investors_num(8..12);
     let mut investors = vec![];
     for _ in 1..=investors_rand {
         let mut signers = vec![];
@@ -213,7 +213,7 @@ fn test_01_create_tollgate_token() {
 fn test_02_create_coh_token() {
     let mut ctx = TestContext::default();
     let key = String::from("coh");
-    let amount = 10_000_000_000;
+    let amount = 10 * LAMPORTS_PER_SOL;
     let quote_mint = SOL_MINT;
     let pool_config = pubkey!("FzvMYBQ29z2J21QPsABpJYYxQBEKGsxA6w6J2HYceFj8");
     let (creator, base_mint, creator_ata) =
@@ -225,7 +225,7 @@ fn test_02_create_coh_token() {
     let token = ctx.tokens.get(&key).expect("");
     let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
     let pool_params = prepare_pool_creation_params(
-        4 * 10 * 9,
+        4 * LAMPORTS_PER_SOL,
         10 * LAMPORTS_PER_SOL,
         MIN_SQRT_PRICE,
         MAX_SQRT_PRICE,

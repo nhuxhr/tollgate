@@ -58,24 +58,39 @@ pub fn crank<'info>(
     // Validate params
     params.assert(investors)?;
 
-    // Validate progress cursor
-    if params.cursor < progress.cursor {
-        // Idempotent: nothing to do
-        msg!("Crank::Cursor behind progress, skipping");
-        return Ok(());
-    } else if params.cursor > progress.cursor {
-        // Cannot skip ahead
-        return Err(TollgateError::PaginationCursorTooLarge.into());
-    }
-
-    if investors.saturating_sub(params.cursor) == 0 {
-        msg!("Crank::No investors to process, exiting");
-        return Ok(());
-    }
+    let vault_seeds = &[
+        VAULT_SEED,
+        policy.vault.as_ref(),
+        INVESTOR_FEE_POS_OWNER,
+        &[policy.owner_bump],
+    ];
+    let vault_signer = &[&vault_seeds[..]];
 
     let day = if progress.is_new_day(timestamp) {
         // New day
-        if !matches!(progress.day_state, DayState::New) {
+        if progress.last_distribution_ts == 0 || !matches!(progress.day_state, DayState::New) {
+            let remainder = ctx
+                .accounts
+                .quote_account
+                .amount
+                .saturating_sub(progress.carry);
+            if remainder != 0 {
+                let cpi_accounts = token_interface::Transfer {
+                    from: ctx.accounts.quote_account.to_account_info(),
+                    to: ctx.accounts.creator_accoount.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                };
+                let cpi_ctx = CpiContext::new_with_signer(
+                    ctx.accounts.quote_program.to_account_info(),
+                    cpi_accounts,
+                    vault_signer,
+                );
+                anchor_spl::token_interface::transfer(cpi_ctx, remainder)?;
+                msg!(
+                    "Crank::Transferred previous day remainder to creator: {}",
+                    remainder
+                );
+            }
             progress.start_new_day(timestamp)?;
         }
         DayState::New
@@ -92,32 +107,57 @@ pub fn crank<'info>(
 
     msg!("Crank::Processing day state: {:?}", day);
 
-    // Load pool and position accounts
-    let pool = &ctx.accounts.pool.load()?;
-    let position = &ctx.accounts.position.load()?;
+    // Validate progress cursor
+    if params.cursor < progress.cursor {
+        // Idempotent: nothing to do
+        msg!("Crank::Cursor behind progress, skipping");
+        return Ok(());
+    } else if params.cursor > progress.cursor {
+        // Cannot skip ahead
+        return Err(TollgateError::PaginationCursorTooLarge.into());
+    }
 
-    // Determine base/quote mints
-    let (base_mint, quote_mint) = if policy.quote_mint == pool.token_a_mint {
-        (&pool.token_b_mint, &pool.token_a_mint)
-    } else {
-        (&pool.token_a_mint, &pool.token_b_mint)
+    if investors.saturating_sub(params.cursor) == 0 {
+        msg!("Crank::No investors to process, exiting");
+        return Ok(());
+    }
+
+    // Load the pool and pool config accounts
+    let (fee_a_pending, fee_b_pending, _, quote_token_order) = {
+        // Load pool and position accounts
+        let pool = &ctx.accounts.pool.load()?;
+        let position = &ctx.accounts.position.load()?;
+
+        // Determine base/quote mints
+        let (base_mint, quote_mint) = if policy.quote_mint == pool.token_a_mint {
+            (&pool.token_b_mint, &pool.token_a_mint)
+        } else {
+            (&pool.token_a_mint, &pool.token_b_mint)
+        };
+
+        // Determine base/quote token order
+        let base_token_order = utils::token::get_token_order(pool, base_mint);
+        let quote_token_order = utils::token::get_token_order(pool, quote_mint);
+
+        // Check base/quote token order is valid
+        require!(base_token_order.is_some(), TollgateError::BaseMintNotInPool);
+        require!(
+            quote_token_order.is_some(),
+            TollgateError::QuoteMintNotInPool
+        );
+
+        (
+            position.fee_a_pending,
+            position.fee_b_pending,
+            base_token_order,
+            quote_token_order,
+        )
     };
-
-    // Determine base/quote token order
-    let base_token_order = utils::token::get_token_order(pool, base_mint);
-    let quote_token_order = utils::token::get_token_order(pool, quote_mint);
-
-    // Check base/quote token order is valid
-    require!(base_token_order.is_some(), TollgateError::BaseMintNotInPool);
-    require!(
-        quote_token_order.is_some(),
-        TollgateError::QuoteMintNotInPool
-    );
 
     let mut distributable = if matches!(day, DayState::New) {
         let (base_fee, quote_fee) = match quote_token_order.unwrap() {
-            utils::token::TokenOrder::A => (position.fee_b_pending, position.fee_a_pending),
-            utils::token::TokenOrder::B => (position.fee_a_pending, position.fee_b_pending),
+            utils::token::TokenOrder::A => (fee_b_pending, fee_a_pending),
+            utils::token::TokenOrder::B => (fee_a_pending, fee_b_pending),
         };
 
         require_eq!(base_fee, 0, TollgateError::BaseDenominatedFees);
@@ -172,7 +212,7 @@ pub fn crank<'info>(
                 "Crank::Claiming DAMM v2 position fee: quote_fee={}",
                 quote_fee
             );
-            damm_v2::cpi::claim_position_fee(CpiContext::new(
+            damm_v2::cpi::claim_position_fee(CpiContext::new_with_signer(
                 ctx.accounts.amm_program.to_account_info(),
                 damm_v2::cpi::accounts::ClaimPositionFee {
                     pool_authority: ctx.accounts.pool_authority.to_account_info(),
@@ -191,6 +231,7 @@ pub fn crank<'info>(
                     event_authority: ctx.accounts.event_authority.to_account_info(),
                     program: ctx.accounts.amm_program.to_account_info(),
                 },
+                vault_signer,
             ))?;
 
             // Emit QuoteFeesClaimed event
@@ -206,9 +247,9 @@ pub fn crank<'info>(
             });
         }
 
-        quote_fee.saturating_add(progress.carry)
+        quote_fee.saturating_add(ctx.accounts.quote_account.amount)
     } else {
-        progress.carry
+        ctx.accounts.quote_account.amount
     };
 
     msg!("Crank::Distributable amount after carry: {}", distributable);
@@ -224,7 +265,7 @@ pub fn crank<'info>(
         );
     }
 
-    if distributable < policy.min_payout_lamports {
+    if matches!(day, DayState::New) && distributable < policy.min_payout_lamports {
         progress.carry = distributable;
         msg!(
             "Crank::Distributable below min payout, carrying over: {}",
@@ -262,16 +303,8 @@ pub fn crank<'info>(
         investor_fee_quote
     );
 
-    let page_start = (params.cursor / 2) as usize;
+    let page_start = params.cursor as usize;
     let page_end = (page_start + params.page_size as usize).min(investors as usize);
-
-    let vault_seeds = &[
-        VAULT_SEED,
-        policy.vault.as_ref(),
-        INVESTOR_FEE_POS_OWNER,
-        &[policy.owner_bump],
-    ];
-    let vault_signer = &[&vault_seeds[..]];
 
     let mut page_payouts = 0u64;
     for idx in page_start..page_end {
@@ -293,19 +326,36 @@ pub fn crank<'info>(
             TollgateError::InvalidInvestorAta
         );
 
-        let ata_data = investor_ata_ai.data.borrow();
-        let _token_account = match token::TokenAccount::try_deserialize(&mut &ata_data[..]) {
-            Ok(t) => t,
-            Err(_) => {
-                if policy.init_investor_ata {
-                    // TODO: init invesstor ATA
-                    // return Err(TollgateError::UninitializedInvestorAta.into());
-                    continue;
-                } else {
-                    continue;
+        {
+            let ata_data = investor_ata_ai.data.borrow();
+            match token::TokenAccount::try_deserialize(&mut &ata_data[..]) {
+                Ok(t) => t,
+                Err(_) => {
+                    if policy.init_investor_ata {
+                        // TODO: init invesstor ATA
+                        continue;
+
+                        // let cpi_accounts = associated_token::Create {
+                        //     payer: ctx.accounts.payer.to_account_info(),
+                        //     associated_token: investor_ata_ai.clone(), // Mut
+                        //     authority: authority.clone(),              // Read
+                        //     mint: ctx.accounts.quote_mint.to_account_info(),
+                        //     system_program: ctx.accounts.system_program.to_account_info(),
+                        //     token_program: ctx.accounts.quote_program.to_account_info(),
+                        //     // rent: Rent::default(), // Sysvar, but Anchor CPI handles it implicitly if not passed
+                        // };
+                        // let cpi_program = ctx.accounts.associated_token_program.to_account_info();
+                        // let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                        // associated_token::create_idempotent(cpi_ctx)?; // Create idempotent for safety
+                        //
+                        // let ata_data = investor_ata_ai.data.borrow();
+                        // token::TokenAccount::try_deserialize(&mut &ata_data[..])?
+                    } else {
+                        continue;
+                    }
                 }
-            }
-        };
+            };
+        }
 
         let net = contract.ix.net_amount_deposited;
         let avail = contract.available_to_claim(timestamp as u64, 0.0);
@@ -319,7 +369,7 @@ pub fn crank<'info>(
         if investor_share >= policy.min_payout_lamports {
             let cpi_accounts = token_interface::Transfer {
                 from: ctx.accounts.quote_account.to_account_info(),
-                to: investor_ata_ai.clone(),
+                to: investor_ata_ai.to_account_info(),
                 authority: ctx.accounts.owner.to_account_info(),
             };
             let cpi_ctx = CpiContext::new_with_signer(
@@ -333,7 +383,7 @@ pub fn crank<'info>(
     }
 
     progress.daily_spent += page_payouts;
-    progress.cursor += ((page_end - page_start) as u32) * 2;
+    progress.cursor += (page_end - page_start) as u32;
 
     msg!(
         "Crank::Processed page {} to {}, payouts: {}",

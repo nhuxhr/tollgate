@@ -9,6 +9,8 @@ anchor-client = { workspace = true }
 anchor-spl = { workspace = true }
 anyhow = "1.0.71"
 base64 = "0.21"
+borsh = "0.10.3"
+bytemuck = { version = "1", features = ["derive"] }
 damm-v2 = { workspace = true }
 lazy_static = "1.5.0"
 litesvm = "0.6.1"

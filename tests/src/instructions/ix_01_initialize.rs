@@ -132,7 +132,7 @@ fn test_02_initialize() {
             ),
             tollgate::instruction::Initialize {
                 params: tollgate::instructions::InitializeParams {
-                    init_investor_ata: false,
+                    init_investor_ata: true,
                     investor_fee_share_bps: 10,
                     min_payout_lamports: 1,
                     daily_cap: None,

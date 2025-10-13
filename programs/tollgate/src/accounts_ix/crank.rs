@@ -22,6 +22,7 @@ pub struct AccountCrank<'info> {
 
     /// The progress account.
     #[account(
+        mut,
         seeds = [PROGRESS_SEED, policy.vault.as_ref()],
         bump = progress.bump,
     )]
@@ -57,16 +58,6 @@ pub struct AccountCrank<'info> {
         bump = policy.owner_bump,
     )]
     pub owner: SystemAccount<'info>,
-
-    /// The treasury account.
-    #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = quote_mint,
-        associated_token::authority = owner,
-        associated_token::token_program = quote_program,
-    )]
-    pub treasury: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
     /// The owner base account.
     #[account(

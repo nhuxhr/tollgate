@@ -1,8 +1,10 @@
 use anchor_client::{
-    anchor_lang::{InstructionData, ToAccountMetas},
-    solana_sdk::{instruction::Instruction, pubkey::Pubkey, system_program},
+    anchor_lang::{Discriminator, InstructionData, ToAccountMetas},
+    solana_sdk::{
+        account, instruction::Instruction, pubkey::Pubkey, signer::Signer, system_program,
+    },
 };
-use anchor_spl::{associated_token::get_associated_token_address, token_2022};
+use anchor_spl::{associated_token::get_associated_token_address_with_program_id, token_2022};
 use anyhow::{ensure, Result};
 use ruint::aliases::U256;
 use tollgate::constants::damm_v2_constants;
@@ -80,6 +82,79 @@ pub fn get_token_vault_pda(token_mint: Pubkey, pool: Pubkey) -> (Pubkey, u8) {
     )
 }
 
+pub fn set_damm_v2_position_fees(
+    ctx: &mut TestContext,
+    key: &str,
+    pos_key: &str,
+    base_fee: Option<u64>,
+    quote_fee: Option<u64>,
+) {
+    let token = ctx.tokens.get(key).expect("");
+    let base_mint = token.base_mint.pubkey();
+    let quote_mint = token.quote_mint;
+    let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
+    let pos_mint = token.pos_mints.get(pos_key).unwrap();
+    let (position, _) = get_position_pda(pos_mint.pubkey());
+
+    let pool_acc = ctx.svm.get_account(&pool).unwrap();
+    let pos_acc = ctx.svm.get_account(&position).unwrap();
+
+    let mut pos_data_slice = [0; 400];
+    let pool_pacc: damm_v2::accounts::Pool =
+        bytemuck::try_pod_read_unaligned(pool_acc.data.as_slice().split_at(8).1).expect("");
+    let pos_pacc: damm_v2::accounts::Position =
+        bytemuck::try_pod_read_unaligned(pos_acc.data.as_slice().split_at(8).1).expect("");
+    let pos_state: &mut damm_v2::accounts::Position =
+        bytemuck::try_from_bytes_mut(&mut pos_data_slice).expect("");
+
+    let quote_token_order = tollgate::utils::token::get_token_order(&pool_pacc, &quote_mint);
+    let (final_base_fee, final_quote_fee) = match quote_token_order.unwrap() {
+        tollgate::utils::token::TokenOrder::A => (
+            base_fee.unwrap_or(pos_pacc.fee_b_pending),
+            quote_fee.unwrap_or(pos_pacc.fee_a_pending),
+        ),
+        tollgate::utils::token::TokenOrder::B => (
+            base_fee.unwrap_or(pos_pacc.fee_a_pending),
+            quote_fee.unwrap_or(pos_pacc.fee_b_pending),
+        ),
+    };
+
+    let (fee_a_pending, fee_b_pending) = match quote_token_order.unwrap() {
+        tollgate::utils::token::TokenOrder::A => (final_quote_fee, final_base_fee),
+        tollgate::utils::token::TokenOrder::B => (final_base_fee, final_quote_fee),
+    };
+
+    pos_state.pool = pos_pacc.pool;
+    pos_state.nft_mint = pos_pacc.nft_mint;
+    pos_state.fee_a_per_token_checkpoint = pos_pacc.fee_a_per_token_checkpoint;
+    pos_state.fee_b_per_token_checkpoint = pos_pacc.fee_b_per_token_checkpoint;
+    pos_state.fee_a_pending = fee_a_pending;
+    pos_state.fee_b_pending = fee_b_pending;
+    pos_state.unlocked_liquidity = pos_pacc.unlocked_liquidity;
+    pos_state.vested_liquidity = pos_pacc.vested_liquidity;
+    pos_state.permanent_locked_liquidity = pos_pacc.permanent_locked_liquidity;
+    pos_state.metrics = pos_pacc.metrics;
+    pos_state.reward_infos = pos_pacc.reward_infos;
+    pos_state.padding = pos_pacc.padding;
+
+    let mut updated_pos_data = Vec::with_capacity(408);
+    updated_pos_data.extend_from_slice(damm_v2::accounts::Position::DISCRIMINATOR);
+    updated_pos_data.extend_from_slice(&pos_data_slice);
+
+    ctx.svm
+        .set_account(
+            position,
+            account::Account {
+                lamports: pos_acc.lamports,
+                data: updated_pos_data,
+                owner: pos_acc.owner,
+                executable: pos_acc.executable,
+                rent_epoch: pos_acc.rent_epoch,
+            },
+        )
+        .unwrap();
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn get_initialize_pool_ix_accs(
     ctx: &TestContext,
@@ -106,11 +181,13 @@ pub fn get_initialize_pool_ix_accs(
     let (base_vault, _) = get_token_vault_pda(base_mint, pool);
     let (quote_vault, _) = get_token_vault_pda(quote_mint, pool);
 
-    let payer_base_account = get_associated_token_address(&creator, &base_mint);
-    let payer_quote_account = get_associated_token_address(&creator, &quote_mint);
-
     let base_mint_acc = ctx.svm.get_account(&base_mint).expect("");
     let quote_mint_acc = ctx.svm.get_account(&quote_mint).expect("");
+
+    let payer_base_account =
+        get_associated_token_address_with_program_id(&creator, &base_mint, &base_mint_acc.owner);
+    let payer_quote_account =
+        get_associated_token_address_with_program_id(&creator, &quote_mint, &quote_mint_acc.owner);
 
     damm_v2::client::accounts::InitializePool {
         creator,
@@ -168,11 +245,13 @@ pub fn get_initialize_customizable_pool_ix_accs(
     let (base_vault, _) = get_token_vault_pda(base_mint, pool);
     let (quote_vault, _) = get_token_vault_pda(quote_mint, pool);
 
-    let payer_base_account = get_associated_token_address(&creator, &base_mint);
-    let payer_quote_account = get_associated_token_address(&creator, &quote_mint);
-
     let base_mint_acc = ctx.svm.get_account(&base_mint).expect("");
     let quote_mint_acc = ctx.svm.get_account(&quote_mint).expect("");
+
+    let payer_base_account =
+        get_associated_token_address_with_program_id(&creator, &base_mint, &base_mint_acc.owner);
+    let payer_quote_account =
+        get_associated_token_address_with_program_id(&creator, &quote_mint, &quote_mint_acc.owner);
 
     damm_v2::client::accounts::InitializeCustomizablePool {
         creator,
@@ -231,11 +310,13 @@ pub fn get_initialize_pool_with_dynamic_config_ix_accs(
     let (base_vault, _) = get_token_vault_pda(base_mint, pool);
     let (quote_vault, _) = get_token_vault_pda(quote_mint, pool);
 
-    let payer_base_account = get_associated_token_address(&creator, &base_mint);
-    let payer_quote_account = get_associated_token_address(&creator, &quote_mint);
-
     let base_mint_acc = ctx.svm.get_account(&base_mint).expect("");
     let quote_mint_acc = ctx.svm.get_account(&quote_mint).expect("");
+
+    let payer_base_account =
+        get_associated_token_address_with_program_id(&creator, &base_mint, &base_mint_acc.owner);
+    let payer_quote_account =
+        get_associated_token_address_with_program_id(&creator, &quote_mint, &quote_mint_acc.owner);
 
     damm_v2::client::accounts::InitializePoolWithDynamicConfig {
         creator,

@@ -132,13 +132,12 @@ The `crank` instruction is used to crank the daily distribution.
 | Account                    | Constraint                                            | Description                                           |
 | -------------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
 | `policy`                   | `PDA`                                                 | The policy account.                                   |
-| `progress`                 | `PDA`                                                 | The progress account.                                 |
+| `progress`                 | `mut`, `PDA`                                          | The progress account.                                 |
 | `pool`                     | `constraint = is_valid_pool`                          | The DAMM v2 pool account that must be valid.          |
 | `position_nft_account`     | `token::authority = owner`                            | The position NFT account.                             |
 | `position`                 | `mut`, `has_one = pool`                               | The DAMM v2 pool position account.                    |
 | `pool_authority`           | -                                                     | The pool authority account.                           |
 | `owner`                    | `PDA`                                                 | The system account that owns the vault.               |
-| `treasury`                 | `init_if_needed`                                      | The treasury account.                                 |
 | `base_account`             | `init_if_needed`                                      | The owner base account.                               |
 | `quote_account`            | `init_if_needed`                                      | The owner quote account.                              |
 | `base_vault`               | `mut`, `token::token_program = base_program`          | The base vault account.                               |

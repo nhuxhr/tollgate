@@ -7004,6 +7004,8 @@ dependencies = [
  "anchor-spl",
  "anyhow",
  "base64 0.21.7",
+ "borsh 0.10.4",
+ "bytemuck",
  "damm-v2",
  "lazy_static",
  "litesvm",

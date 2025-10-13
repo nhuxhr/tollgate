@@ -66,6 +66,7 @@ impl Progress {
         self.day_state = DayState::New;
         self.last_distribution_ts = now_ts;
         self.daily_spent = 0;
+        self.carry = 0;
         self.cursor = 0;
 
         Ok(())
