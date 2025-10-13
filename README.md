@@ -54,7 +54,7 @@ These dumped programs and accounts are then loaded into the LiteSVM context in t
 
 #### Test Video
 
-![Test Video](./assets/videos/test.mp4)
+[![Test Video](https://img.youtube.com/vi/KCyhYAQ1L2g/0.jpg)](https://www.youtube.com/watch?v=KCyhYAQ1L2g)
 
 ## Integration Steps
 
