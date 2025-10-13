@@ -326,35 +326,29 @@ pub fn crank<'info>(
             TollgateError::InvalidInvestorAta
         );
 
-        {
-            let ata_data = investor_ata_ai.data.borrow();
-            match token::TokenAccount::try_deserialize(&mut &ata_data[..]) {
-                Ok(t) => t,
-                Err(_) => {
-                    if policy.init_investor_ata {
-                        // TODO: init invesstor ATA
-                        continue;
+        if investor_ata_ai.data_len() != token::TokenAccount::LEN {
+            if policy.init_investor_ata {
+                // TODO: init invesstor ATA
+                continue;
 
-                        // let cpi_accounts = associated_token::Create {
-                        //     payer: ctx.accounts.payer.to_account_info(),
-                        //     associated_token: investor_ata_ai.clone(), // Mut
-                        //     authority: authority.clone(),              // Read
-                        //     mint: ctx.accounts.quote_mint.to_account_info(),
-                        //     system_program: ctx.accounts.system_program.to_account_info(),
-                        //     token_program: ctx.accounts.quote_program.to_account_info(),
-                        //     // rent: Rent::default(), // Sysvar, but Anchor CPI handles it implicitly if not passed
-                        // };
-                        // let cpi_program = ctx.accounts.associated_token_program.to_account_info();
-                        // let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-                        // associated_token::create_idempotent(cpi_ctx)?; // Create idempotent for safety
-                        //
-                        // let ata_data = investor_ata_ai.data.borrow();
-                        // token::TokenAccount::try_deserialize(&mut &ata_data[..])?
-                    } else {
-                        continue;
-                    }
-                }
-            };
+                // let cpi_accounts = associated_token::Create {
+                //     payer: ctx.accounts.payer.to_account_info(),
+                //     associated_token: investor_ata_ai.clone(), // Mut
+                //     authority: authority.clone(),              // Read
+                //     mint: ctx.accounts.quote_mint.to_account_info(),
+                //     system_program: ctx.accounts.system_program.to_account_info(),
+                //     token_program: ctx.accounts.quote_program.to_account_info(),
+                //     // rent: Rent::default(), // Sysvar, but Anchor CPI handles it implicitly if not passed
+                // };
+                // let cpi_program = ctx.accounts.associated_token_program.to_account_info();
+                // let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                // associated_token::create_idempotent(cpi_ctx)?; // Create idempotent for safety
+                //
+                // let ata_data = investor_ata_ai.data.borrow();
+                // token::TokenAccount::try_deserialize(&mut &ata_data[..])?
+            } else {
+                continue;
+            }
         }
 
         let net = contract.ix.net_amount_deposited;
