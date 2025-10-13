@@ -5,6 +5,7 @@
 - [Tollgate Program](#tollgate-program)
   - [Introduction](#introduction)
     - [Testing](#testing)
+      - [Test Video](#test-video)
   - [Integration Steps](#integration-steps)
     - [Overview](#overview)
     - [Step 1: Initialize](#step-1-initialize)
@@ -13,7 +14,7 @@
     - [Policy Account](#policy-account)
     - [Progress Account](#progress-account)
   - [Error Codes](#error-codes)
-  - [Day & Pagination Semantics](#day-pagination-semantics)
+  - [Day and Pagination Semantics](#day-and-pagination-semantics)
     - [Day State](#day-state)
     - [Pagination Cursor](#pagination-cursor)
     - [Page Size](#page-size)
@@ -50,6 +51,10 @@ The dumped accounts include:
 - Treasury account
 
 These dumped programs and accounts are then loaded into the LiteSVM context in the `svm.rs` file. The LiteSVM context is used to simulate the Solana blockchain and execute the tests.
+
+#### Test Video
+
+![Test Video](./assets/videos/test.mp4)
 
 ## Integration Steps
 
@@ -258,7 +263,7 @@ The Tollgate program uses the following error codes:
 | PolicyAlreadyInitialized   | Initialization errors     | The policy account has already been initialized.                      |
 | ProgressAlreadyInitialized | Initialization errors     | The progress account has already been initialized.                    |
 
-## Day & Pagination Semantics
+## Day and Pagination Semantics
 
 The Tollgate program uses the following day/pagination semantics:
 
