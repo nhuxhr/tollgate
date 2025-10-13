@@ -454,9 +454,11 @@ pub fn crank<'info>(
 
         msg!(
             "Crank::Day closed, total distributed: {}, carry: {}",
-            distributable,
+            distributable.saturating_add(ctx.accounts.progress.daily_spent),
             ctx.accounts.progress.carry
         );
+
+        ctx.accounts.progress.close_day()?;
     }
 
     msg!("Crank::Completed successfully");
