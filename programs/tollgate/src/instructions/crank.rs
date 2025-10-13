@@ -439,6 +439,13 @@ pub fn crank<'info>(
             );
         }
 
+        let total_distributed = distributable.saturating_add(
+            ctx.accounts
+                .progress
+                .daily_spent
+                .saturating_sub(page_payouts),
+        );
+
         emit!(CreatorPayoutDayClosed {
             vault: ctx.accounts.policy.vault,
             policy: ctx.accounts.policy.key(),
@@ -447,14 +454,14 @@ pub fn crank<'info>(
             position: ctx.accounts.position.key(),
             owner: ctx.accounts.owner.key(),
             timestamp,
-            total_distributed: distributable,
+            total_distributed,
             creator_payout: creator_share,
             carry: ctx.accounts.progress.carry
         });
 
         msg!(
             "Crank::Day closed, total distributed: {}, carry: {}",
-            distributable.saturating_add(ctx.accounts.progress.daily_spent),
+            total_distributed,
             ctx.accounts.progress.carry
         );
 
