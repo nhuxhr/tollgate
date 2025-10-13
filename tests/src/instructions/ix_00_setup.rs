@@ -7,7 +7,7 @@ use anchor_client::solana_sdk::{
 use anchor_spl::{
     associated_token::{
         get_associated_token_address,
-        spl_associated_token_account::instruction::create_associated_token_account,
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent,
     },
     token::spl_token::{self, native_mint},
 };
@@ -94,7 +94,7 @@ fn test_01_create_tollgate_token() {
     .expect("");
     ctx.send_transaction(
         &[
-            create_associated_token_account(
+            create_associated_token_account_idempotent(
                 &creator.pubkey(),
                 &creator.pubkey(),
                 &native_mint::id(),
@@ -233,7 +233,7 @@ fn test_02_create_coh_token() {
     .expect("");
     ctx.send_transaction(
         &[
-            create_associated_token_account(
+            create_associated_token_account_idempotent(
                 &creator.pubkey(),
                 &creator.pubkey(),
                 &native_mint::id(),

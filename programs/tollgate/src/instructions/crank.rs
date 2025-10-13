@@ -162,17 +162,17 @@ pub fn crank<'info>(
     ];
     let vault_signer = &[&vault_seeds[..]];
 
+    let prev_remainder = ctx
+        .accounts
+        .quote_account
+        .amount
+        .saturating_sub(ctx.accounts.progress.carry);
     let day = if ctx.accounts.progress.is_new_day(timestamp) {
         // New day
         if ctx.accounts.progress.last_distribution_ts == 0
             || !matches!(ctx.accounts.progress.day_state, DayState::New)
         {
-            let remainder = ctx
-                .accounts
-                .quote_account
-                .amount
-                .saturating_sub(ctx.accounts.progress.carry);
-            if remainder != 0 {
+            if prev_remainder != 0 {
                 let cpi_accounts = token_interface::Transfer {
                     from: ctx.accounts.quote_account.to_account_info(),
                     to: ctx.accounts.creator_accoount.to_account_info(),
@@ -183,15 +183,21 @@ pub fn crank<'info>(
                     cpi_accounts,
                     vault_signer,
                 );
-                anchor_spl::token_interface::transfer(cpi_ctx, remainder)?;
+                anchor_spl::token_interface::transfer(cpi_ctx, prev_remainder)?;
                 msg!(
                     "Crank::Transferred previous day remainder to creator: {}",
-                    remainder
+                    prev_remainder
                 );
             }
             ctx.accounts.progress.start_new_day(timestamp)?;
         }
         DayState::New
+    } else if matches!(ctx.accounts.progress.day_state, DayState::Closed)
+        && ctx.accounts.progress.last_distribution_ts != 0
+    {
+        // Closed day and not the first time crank is called
+        msg!("Crank::Day is closed, skipping");
+        return Ok(());
     } else if ctx.accounts.progress.is_same_day(timestamp) {
         // Same day
         if !matches!(ctx.accounts.progress.day_state, DayState::Same) {
@@ -261,7 +267,12 @@ pub fn crank<'info>(
             vault_signer,
         )?;
 
-        quote_fee.saturating_add(ctx.accounts.quote_account.amount)
+        quote_fee.saturating_add(
+            ctx.accounts
+                .quote_account
+                .amount
+                .saturating_sub(prev_remainder),
+        )
     } else {
         ctx.accounts.quote_account.amount
     };

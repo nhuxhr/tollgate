@@ -8,7 +8,9 @@ use anchor_client::{
 use anchor_spl::{
     associated_token::{
         get_associated_token_address, get_associated_token_address_with_program_id,
-        spl_associated_token_account::{self, instruction::create_associated_token_account},
+        spl_associated_token_account::{
+            self, instruction::create_associated_token_account_idempotent,
+        },
     },
     token::spl_token,
 };
@@ -152,13 +154,13 @@ fn test_01_crank_below_min_payout() {
 
     ctx.send_transaction(
         &[
-            create_associated_token_account(
+            create_associated_token_account_idempotent(
                 &payer.pubkey(),
                 &pool_authority,
                 &base_mint,
                 &spl_token::ID,
             ),
-            create_associated_token_account(
+            create_associated_token_account_idempotent(
                 &payer.pubkey(),
                 &pool_authority,
                 &quote_mint,
@@ -249,7 +251,7 @@ fn test_04_create_investors_ata() {
     // TODO: let program init ATA when needed per policy (this will require additional investor pubkey)
     let mut create_ata_ixs = vec![];
     for i in token.investors.iter() {
-        create_ata_ixs.push(create_associated_token_account(
+        create_ata_ixs.push(create_associated_token_account_idempotent(
             &payer.pubkey(),
             &i.key.pubkey(),
             &token.quote_mint,
@@ -355,7 +357,7 @@ fn test_08_crank_day_two_page_2_to_5_invalid_cursor() {
     let pos_key = "initialize";
     let payer = get_payer();
 
-    ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64 + 1);
+    ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
     let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
 
     ctx.send_transaction(
@@ -426,6 +428,77 @@ fn test_10_crank_day_two_full() {
                     params: tollgate::instructions::CrankParams {
                         cursor: 4,
                         page_size: token.investors.len() as u32 - 4,
+                    },
+                },
+                accounts.1,
+            ),
+        ],
+        Some(&payer.pubkey()),
+        &[payer],
+    )
+    .expect("");
+
+    log_progress_account(&ctx, key);
+}
+
+#[test]
+fn test_11_crank_day_two_full_idempotent() {
+    let mut ctx = TestContext::default();
+    let key = "tollgate";
+    let pos_key = "initialize";
+    let payer = get_payer();
+
+    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+
+    ctx.send_transaction(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_price(50_000),
+            ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
+            crank_ix(
+                accounts.0,
+                tollgate::instruction::Crank {
+                    params: tollgate::instructions::CrankParams {
+                        cursor: 4,
+                        page_size: token.investors.len() as u32 - 4,
+                    },
+                },
+                accounts.1,
+            ),
+        ],
+        Some(&payer.pubkey()),
+        &[payer],
+    )
+    .expect("");
+
+    log_progress_account(&ctx, key);
+}
+
+#[test]
+fn test_12_crank_day_three_full() {
+    let mut ctx = TestContext::default();
+    let key = "tollgate";
+    let pos_key = "initialize";
+    let payer = get_payer();
+
+    ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
+    set_damm_v2_position_fees(
+        &mut ctx,
+        key,
+        pos_key,
+        Some(0),
+        Some((LAMPORTS_PER_SOL as f64 / 1.6) as u64),
+    );
+    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+
+    ctx.send_transaction(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
+            crank_ix(
+                accounts.0,
+                tollgate::instruction::Crank {
+                    params: tollgate::instructions::CrankParams {
+                        cursor: 0,
+                        page_size: token.investors.len() as u32,
                     },
                 },
                 accounts.1,
