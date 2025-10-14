@@ -17,6 +17,8 @@ pub enum TollgateError {
     BaseAndQuoteMintsAreSame,
     #[msg("Invalid investor accounts")]
     InvalidInvestorAccounts,
+    #[msg("Invalid investor pubkey")]
+    InvalidInvestorPubkey,
     #[msg("Invalid investor ATA")]
     InvalidInvestorAta,
 

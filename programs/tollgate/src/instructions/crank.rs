@@ -1,14 +1,17 @@
 #![allow(deprecated)]
 
 use anchor_lang::{prelude::*, solana_program::borsh::try_from_slice_unchecked};
-use anchor_spl::{associated_token::get_associated_token_address, token, token_interface};
+use anchor_spl::{
+    associated_token::{self, get_associated_token_address, AssociatedToken},
+    token, token_interface,
+};
 use streamflow_sdk::state::Contract;
 
 use crate::{
     constants::{INVESTOR_FEE_POS_OWNER, MAX_BPS, VAULT_SEED},
     error::TollgateError,
     events::{CreatorPayoutDayClosed, InvestorPayoutPage, QuoteFeesClaimed},
-    state::DayState,
+    state::{DayState, Policy},
     utils, AccountCrank,
 };
 
@@ -126,23 +129,147 @@ fn claim_position_fees<'info>(
     Ok(quote_fee)
 }
 
-pub fn crank<'info>(
+/// Computes contracts and their locked amounts for a page of streams.
+fn compute_page_contracts_and_locked(
+    streams: &[AccountInfo],
+    timestamp: u64,
+) -> Result<(Vec<Contract>, Vec<u64>)> {
+    let mut contracts = Vec::with_capacity(streams.len());
+    let mut lockeds = Vec::with_capacity(streams.len());
+    for stream in streams {
+        let contract_data = stream.data.borrow();
+        let contract = try_from_slice_unchecked::<Contract>(&contract_data)?;
+        let net = contract.ix.net_amount_deposited;
+        let avail = contract.available_to_claim(timestamp, 0.0);
+        let locked = net.saturating_sub(avail);
+        contracts.push(contract);
+        lockeds.push(locked);
+    }
+    Ok((contracts, lockeds))
+}
+
+/// Processes a single page of investors, returning (page_payouts).
+/// This is the shared logic for both crank modes.
+#[allow(clippy::too_many_arguments)]
+fn process_investor_page<'info>(
+    _streams: &[AccountInfo<'info>],
+    atas: &[AccountInfo<'info>],
+    authorities: &[Option<AccountInfo<'info>>], // None for standard crank
+    contracts: &[Contract],
+    locked_per: &[u64],
+    quote_account: &InterfaceAccount<'info, token_interface::TokenAccount>,
+    quote_program: &Interface<'info, token_interface::TokenInterface>,
+    policy: &Account<'info, Policy>,
+    owner: &AccountInfo<'info>,
+    vault_signer: &[&[&[u8]]],
+    payer: Option<&Signer<'info>>, // Signer for init mode
+    system_program: Option<&Program<'info, System>>,
+    associated_token_program: Option<&Program<'info, AssociatedToken>>,
+    quote_mint: &AccountInfo<'info>,
+    min_payout_lamports: u64,
+    investor_fee_quote: u64,
+    locked_total: u64,
+    page_size: usize,
+) -> Result<u64> {
+    let mut page_payouts = 0u64;
+
+    for i in 0..page_size {
+        let contract = &contracts[i];
+        let recipient = contract.recipient;
+        let expected_ata = get_associated_token_address(&recipient, quote_mint.key);
+        let ata_ai = &atas[i];
+        require_keys_eq!(
+            ata_ai.key(),
+            expected_ata,
+            TollgateError::InvalidInvestorAta
+        );
+
+        if let Some(ref inv_ai) = authorities[i] {
+            require_keys_eq!(
+                inv_ai.key(),
+                recipient,
+                TollgateError::InvalidInvestorPubkey
+            );
+        }
+
+        // Check if ATA needs initialization
+        if ata_ai.data_len() != token::TokenAccount::LEN {
+            if !policy.init_investor_ata {
+                continue;
+            }
+            if authorities[i].is_none() {
+                // Standard crank: skip uninitialized ATAs
+                continue;
+            }
+            // Init mode: create ATA
+            let authority_ai = &authorities[i].as_ref().unwrap();
+            let cpi_accounts = associated_token::Create {
+                payer: payer.unwrap().to_account_info(),
+                associated_token: ata_ai.clone(),
+                authority: authority_ai.to_account_info(),
+                mint: quote_mint.clone(),
+                system_program: system_program.unwrap().to_account_info(),
+                token_program: quote_program.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new(
+                associated_token_program.unwrap().to_account_info(),
+                cpi_accounts,
+            );
+            associated_token::create_idempotent(cpi_ctx)?;
+        }
+
+        let locked = locked_per[i];
+        let investor_share = if locked_total > 0 {
+            (investor_fee_quote * locked) / locked_total
+        } else {
+            0
+        };
+        if investor_share >= min_payout_lamports {
+            let cpi_accounts = token_interface::Transfer {
+                from: quote_account.to_account_info(),
+                to: ata_ai.clone(),
+                authority: owner.clone(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                quote_program.to_account_info(),
+                cpi_accounts,
+                vault_signer,
+            );
+            anchor_spl::token_interface::transfer(cpi_ctx, investor_share)?;
+            page_payouts = page_payouts.saturating_add(investor_share);
+        }
+    }
+
+    Ok(page_payouts)
+}
+
+fn shared_crank_logic<'info>(
     ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
-    params: CrankParams,
+    params: &CrankParams,
+    init_mode: bool,
 ) -> Result<()> {
+    let (payer, system_program, associated_token_program) = if init_mode {
+        (
+            Some(&ctx.accounts.payer),
+            Some(&ctx.accounts.system_program),
+            Some(&ctx.accounts.associated_token_program),
+        )
+    } else {
+        (None, None, None)
+    };
+
     let clock = Clock::get()?;
     let timestamp = clock.unix_timestamp;
 
-    // Paged investor accounts: Streamflow stream pubkey and investor quote ATA
     let investor_accounts = ctx.remaining_accounts;
+    let stride = if init_mode { 3usize } else { 2usize };
     require_eq!(
         0,
-        investor_accounts.len() % 2,
+        investor_accounts.len() % stride,
         TollgateError::InvalidInvestorAccounts
     );
 
-    // Paginated pro-rata via remaining_accounts (pairs: stream, investor_ata)
-    let page_size = investor_accounts.len() as u32 / 2;
+    let page_size = investor_accounts.len() / stride;
 
     msg!(
         "Crank::Starting crank with cursor={} and page_size={}",
@@ -298,24 +425,30 @@ pub fn crank<'info>(
         return Ok(());
     }
 
-    let locked_total = {
-        let mut total = 0u64;
-
-        for idx in 0..page_size as usize {
-            let investor_idx = idx * 2;
-            let stream = &ctx.remaining_accounts[investor_idx];
-            let contract = match try_from_slice_unchecked::<Contract>(&stream.data.borrow()) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let net = contract.ix.net_amount_deposited;
-            let avail = contract.available_to_claim(timestamp as u64, 0.0);
-            let locked = net.saturating_sub(avail);
-            total = total.saturating_add(locked);
+    // Prepare streams, atas, authorities
+    let mut streams = Vec::with_capacity(page_size);
+    let mut atas = Vec::with_capacity(page_size);
+    let mut authorities = Vec::with_capacity(page_size);
+    for idx in 0..page_size {
+        let offset = idx * stride;
+        if init_mode {
+            let inv_ai = investor_accounts[offset].clone();
+            let stream_ai = investor_accounts[offset + 1].clone();
+            let ata_ai = investor_accounts[offset + 2].clone();
+            streams.push(stream_ai);
+            atas.push(ata_ai);
+            authorities.push(Some(inv_ai));
+        } else {
+            let stream_ai = investor_accounts[offset].clone();
+            let ata_ai = investor_accounts[offset + 1].clone();
+            streams.push(stream_ai);
+            atas.push(ata_ai);
+            authorities.push(None);
         }
+    }
 
-        total
-    };
+    let (contracts, locked_per) = compute_page_contracts_and_locked(&streams, timestamp as u64)?;
+    let locked_total: u64 = locked_per.iter().cloned().sum();
     let f_locked = (locked_total * MAX_BPS as u64) / ctx.accounts.policy.y0;
     let eligible_investor_share_bps =
         (ctx.accounts.policy.investor_fee_share_bps as u64).min(f_locked);
@@ -328,83 +461,32 @@ pub fn crank<'info>(
         investor_fee_quote
     );
 
-    let mut page_payouts = 0u64;
-    for idx in 0..page_size as usize {
-        let investor_idx = idx * 2;
-        let stream_ai = &ctx.remaining_accounts[investor_idx];
-        let investor_ata_ai = &ctx.remaining_accounts[investor_idx + 1];
-
-        let contract_data = stream_ai.data.borrow();
-        let contract = match try_from_slice_unchecked::<Contract>(&contract_data) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let recipient = contract.recipient;
-        let expected_ata =
-            get_associated_token_address(&recipient, &ctx.accounts.policy.quote_mint);
-        require_keys_eq!(
-            investor_ata_ai.key(),
-            expected_ata,
-            TollgateError::InvalidInvestorAta
-        );
-
-        if investor_ata_ai.data_len() != token::TokenAccount::LEN {
-            if ctx.accounts.policy.init_investor_ata {
-                // TODO: init invesstor ATA
-                continue;
-
-                // let cpi_accounts = associated_token::Create {
-                //     payer: ctx.accounts.payer.to_account_info(),
-                //     associated_token: investor_ata_ai.clone(), // Mut
-                //     authority: authority.clone(),              // Read
-                //     mint: ctx.accounts.quote_mint.to_account_info(),
-                //     system_program: ctx.accounts.system_program.to_account_info(),
-                //     token_program: ctx.accounts.quote_program.to_account_info(),
-                //     // rent: Rent::default(), // Sysvar, but Anchor CPI handles it implicitly if not passed
-                // };
-                // let cpi_program = ctx.accounts.associated_token_program.to_account_info();
-                // let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-                // associated_token::create_idempotent(cpi_ctx)?; // Create idempotent for safety
-                //
-                // let ata_data = investor_ata_ai.data.borrow();
-                // token::TokenAccount::try_deserialize(&mut &ata_data[..])?
-            } else {
-                continue;
-            }
-        }
-
-        let net = contract.ix.net_amount_deposited;
-        let avail = contract.available_to_claim(timestamp as u64, 0.0);
-        let locked = net.saturating_sub(avail);
-
-        let investor_share = if locked_total > 0 {
-            (investor_fee_quote * locked) / locked_total
-        } else {
-            0
-        };
-        if investor_share >= ctx.accounts.policy.min_payout_lamports {
-            let cpi_accounts = token_interface::Transfer {
-                from: ctx.accounts.quote_account.to_account_info(),
-                to: investor_ata_ai.to_account_info(),
-                authority: ctx.accounts.owner.to_account_info(),
-            };
-            let cpi_ctx = CpiContext::new_with_signer(
-                ctx.accounts.quote_program.to_account_info(),
-                cpi_accounts,
-                vault_signer,
-            );
-            anchor_spl::token_interface::transfer(cpi_ctx, investor_share)?;
-            page_payouts = page_payouts.saturating_add(investor_share);
-        }
-    }
+    let page_payouts = process_investor_page(
+        &streams,
+        &atas,
+        &authorities,
+        &contracts,
+        &locked_per,
+        &ctx.accounts.quote_account,
+        &ctx.accounts.quote_program,
+        &ctx.accounts.policy,
+        &ctx.accounts.owner.to_account_info(),
+        vault_signer,
+        payer,
+        system_program,
+        associated_token_program,
+        &ctx.accounts.quote_mint.to_account_info(),
+        ctx.accounts.policy.min_payout_lamports,
+        investor_fee_quote,
+        locked_total,
+        page_size,
+    )?;
 
     ctx.accounts.progress.daily_spent += page_payouts;
-    ctx.accounts.progress.cursor += page_size;
+    ctx.accounts.progress.cursor += page_size as u32;
 
     let page_start = params.cursor as usize;
-    let page_end =
-        (page_start + page_size as usize).min(ctx.accounts.policy.investor_count as usize);
+    let page_end = (page_start + page_size).min(ctx.accounts.policy.investor_count as usize);
 
     msg!(
         "Crank::Processed page {} to {}, payouts: {}",
@@ -421,7 +503,7 @@ pub fn crank<'info>(
         position: ctx.accounts.position.key(),
         owner: ctx.accounts.owner.key(),
         cursor: params.cursor,
-        investors: page_size,
+        investors: page_size as u32,
         page_start: page_start as u32,
         page_end: page_end as u32,
         payout: page_payouts
@@ -481,4 +563,18 @@ pub fn crank<'info>(
 
     msg!("Crank::Completed successfully");
     Ok(())
+}
+
+pub fn crank<'info>(
+    ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
+    params: CrankParams,
+) -> Result<()> {
+    shared_crank_logic(ctx, &params, false)
+}
+
+pub fn crank_with_init<'info>(
+    ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
+    params: CrankParams,
+) -> Result<()> {
+    shared_crank_logic(ctx, &params, true)
 }

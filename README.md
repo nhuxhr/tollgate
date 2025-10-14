@@ -131,6 +131,11 @@ let initialize_instruction = Instruction::new_with_borsh(
 
 The `crank` instruction is used to crank the daily distribution. The page size is dynamically determined by the number of investor account pairs provided in `remaining_accounts` (pairs of stream and investor ATA accounts).
 
+There are two variants:
+
+- `crank`: Standard mode. Assumes investor ATAs are already initialized.
+- `crank_with_init`: Initialization mode. Allows creating uninitialized investor ATAs on-the-fly if `policy.init_investor_ata` is `true`. Requires providing investor pubkeys in `remaining_accounts`.
+
 | **Parameter** | **Type** | **Description**                                         |
 | ------------- | -------- | ------------------------------------------------------- |
 | `cursor`      | `u32`    | The cursor that will be used to paginate the investors. |
@@ -159,10 +164,13 @@ The `crank` instruction is used to crank the daily distribution. The page size i
 | `associated_token_program` | -                                                     | The associated token program account.                 |
 | `system_program`           | -                                                     | The system program account.                           |
 
-**Remaining Accounts**: Provide pairs of (stream account, investor ATA account) for the investors to process in this page. The number of pairs determines the page size.
+**Remaining Accounts**:
+
+- For `crank`: Provide pairs of (stream account, investor ATA account). The number of pairs determines the page size.
+- For `crank_with_init`: Provide triplets of (investor pubkey account, stream account, investor ATA account). The number of triplets determines the page size. Investor pubkeys must be readonly and match the stream recipient.
 
 ```rust
-// Crank the daily distribution
+// Crank the daily distribution (standard mode)
 let crank_instruction = Instruction::new_with_borsh(
     tollgate::ID,
     &tollgate::accounts::AccountCrank {
@@ -193,6 +201,9 @@ let crank_instruction = Instruction::new_with_borsh(
         cursor: 0,
     },
 );
+
+// For crank_with_init, use tollgate::instruction::CrankWithInit instead of Crank
+// and provide triplets in remaining_accounts.
 ```
 
 ## Account Structures
@@ -245,6 +256,7 @@ The Tollgate program uses the following error codes:
 | QuoteMintNotInPool         | Invalid inputs            | Quote mint not found in the provided pool.                            |
 | BaseAndQuoteMintsAreSame   | Invalid inputs            | Base and quote mints are the same.                                    |
 | InvalidInvestorAccounts    | Invalid inputs            | The investor accounts are invalid.                                    |
+| InvalidInvestorPubkey      | Invalid inputs            | The investor pubkey is invalid.                                       |
 | InvalidInvestorAta         | Invalid inputs            | The investor ATA is invalid.                                          |
 | PoolConfigMismatch         | Mismatched configurations | The provided pool does not match the provided pool config.            |
 | PoolNotQuoteOnlyFees       | Mismatched configurations | The provided pool is not in quote-only fee mode.                      |

@@ -29,4 +29,11 @@ pub mod tollgate {
     ) -> Result<()> {
         instructions::crank(ctx, params)
     }
+
+    pub fn crank_with_init<'info>(
+        ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
+        params: instructions::CrankParams,
+    ) -> Result<()> {
+        instructions::crank_with_init(ctx, params)
+    }
 }
