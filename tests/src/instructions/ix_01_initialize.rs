@@ -85,6 +85,7 @@ fn test_01_should_failed_base_fee_detected() {
             ),
             tollgate::instruction::Initialize {
                 params: tollgate::instructions::InitializeParams {
+                    investor_count: token.investors.len() as u32,
                     init_investor_ata: false,
                     investor_fee_share_bps: 10,
                     min_payout_lamports: 1,
@@ -132,6 +133,7 @@ fn test_02_initialize() {
             ),
             tollgate::instruction::Initialize {
                 params: tollgate::instructions::InitializeParams {
+                    investor_count: token.investors.len() as u32,
                     init_investor_ata: true,
                     investor_fee_share_bps: 10,
                     min_payout_lamports: 1,

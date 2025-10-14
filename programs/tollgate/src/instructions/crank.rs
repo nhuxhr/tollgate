@@ -14,8 +14,7 @@ use crate::{
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default)]
 pub struct CrankParams {
-    pub cursor: u32,    // Pagination cursor
-    pub page_size: u32, //
+    pub cursor: u32, // Pagination cursor
 }
 
 impl CrankParams {
@@ -131,12 +130,6 @@ pub fn crank<'info>(
     ctx: Context<'_, '_, '_, 'info, AccountCrank<'info>>,
     params: CrankParams,
 ) -> Result<()> {
-    msg!(
-        "Crank::Starting crank with cursor={} and page_size={}",
-        params.cursor,
-        params.page_size
-    );
-
     let clock = Clock::get()?;
     let timestamp = clock.unix_timestamp;
 
@@ -149,10 +142,16 @@ pub fn crank<'info>(
     );
 
     // Paginated pro-rata via remaining_accounts (pairs: stream, investor_ata)
-    let investors = investor_accounts.len() as u32 / 2;
+    let page_size = investor_accounts.len() as u32 / 2;
+
+    msg!(
+        "Crank::Starting crank with cursor={} and page_size={}",
+        params.cursor,
+        page_size
+    );
 
     // Validate params
-    params.assert(investors)?;
+    params.assert(ctx.accounts.policy.investor_count)?;
 
     let vault_seeds = &[
         VAULT_SEED,
@@ -219,11 +218,6 @@ pub fn crank<'info>(
     } else if params.cursor > ctx.accounts.progress.cursor {
         // Cannot skip ahead
         return Err(TollgateError::PaginationCursorTooLarge.into());
-    }
-
-    if investors.saturating_sub(params.cursor) == 0 {
-        msg!("Crank::No investors to process, exiting");
-        return Ok(());
     }
 
     // Load the pool and pool config accounts
@@ -299,10 +293,15 @@ pub fn crank<'info>(
         return Ok(());
     }
 
+    if page_size == 0 {
+        msg!("Crank::No investors to process, exiting");
+        return Ok(());
+    }
+
     let locked_total = {
         let mut total = 0u64;
 
-        for idx in 0..investors as usize {
+        for idx in 0..page_size as usize {
             let investor_idx = idx * 2;
             let stream = &ctx.remaining_accounts[investor_idx];
             let contract = match try_from_slice_unchecked::<Contract>(&stream.data.borrow()) {
@@ -329,11 +328,8 @@ pub fn crank<'info>(
         investor_fee_quote
     );
 
-    let page_start = params.cursor as usize;
-    let page_end = (page_start + params.page_size as usize).min(investors as usize);
-
     let mut page_payouts = 0u64;
-    for idx in page_start..page_end {
+    for idx in 0..page_size as usize {
         let investor_idx = idx * 2;
         let stream_ai = &ctx.remaining_accounts[investor_idx];
         let investor_ata_ai = &ctx.remaining_accounts[investor_idx + 1];
@@ -404,7 +400,11 @@ pub fn crank<'info>(
     }
 
     ctx.accounts.progress.daily_spent += page_payouts;
-    ctx.accounts.progress.cursor += (page_end - page_start) as u32;
+    ctx.accounts.progress.cursor += page_size;
+
+    let page_start = params.cursor as usize;
+    let page_end =
+        (page_start + page_size as usize).min(ctx.accounts.policy.investor_count as usize);
 
     msg!(
         "Crank::Processed page {} to {}, payouts: {}",
@@ -421,13 +421,13 @@ pub fn crank<'info>(
         position: ctx.accounts.position.key(),
         owner: ctx.accounts.owner.key(),
         cursor: params.cursor,
-        investors,
+        investors: page_size,
         page_start: page_start as u32,
         page_end: page_end as u32,
         payout: page_payouts
     });
 
-    if ctx.accounts.progress.cursor >= investors {
+    if ctx.accounts.progress.cursor >= ctx.accounts.policy.investor_count {
         let creator_share = distributable.saturating_sub(investor_fee_quote);
         if creator_share >= ctx.accounts.policy.min_payout_lamports {
             let cpi_accounts = token_interface::Transfer {

@@ -9,6 +9,7 @@ use crate::{
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default)]
 pub struct InitializeParams {
+    pub investor_count: u32,
     pub init_investor_ata: bool,
     pub investor_fee_share_bps: u16,
     pub min_payout_lamports: u64,
@@ -18,6 +19,9 @@ pub struct InitializeParams {
 
 impl InitializeParams {
     pub fn assert(&self) -> Result<()> {
+        // assert investor count is greater than 0
+        require_gt!(self.investor_count, 0, TollgateError::InvalidInvestors);
+
         // assert inveestor fee share bps is less than or equal to 100%
         require_gte!(
             MAX_BPS,

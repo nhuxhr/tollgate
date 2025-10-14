@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     path::Path,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
 
@@ -60,20 +60,20 @@ pub struct JsonAccountInfo {
     pubkey: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Investor {
-    pub key: Keypair,
-    pub stream: Keypair,
+    pub key: Arc<Keypair>,
+    pub stream: Arc<Keypair>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
-    pub creator: Keypair,
-    pub base_mint: Keypair,
+    pub creator: Arc<Keypair>,
+    pub base_mint: Arc<Keypair>,
     pub quote_mint: Pubkey,
     pub pool_config: Pubkey,
-    pub pos_mints: HashMap<String, Keypair>,
-    pub vault: Keypair,
+    pub pos_mints: HashMap<String, Arc<Keypair>>,
+    pub vault: Arc<Keypair>,
     pub investors: Vec<Investor>,
 }
 
@@ -218,7 +218,7 @@ pub fn get_payer() -> &'static Keypair {
 }
 
 pub struct TestContext {
-    pub payer: Keypair,
+    pub payer: Arc<Keypair>,
     pub svm: MutexGuard<'static, LiteSVM>,
     pub tokens: MutexGuard<'static, HashMap<String, Token>>,
 }
@@ -228,7 +228,7 @@ impl Default for TestContext {
         Self {
             payer: {
                 let anchor_wallet = std::env::var("ANCHOR_WALLET").unwrap();
-                read_keypair_file(&anchor_wallet).unwrap()
+                Arc::new(read_keypair_file(&anchor_wallet).unwrap())
             },
             svm: SVM.lock().unwrap(),
             tokens: TOKENS.lock().unwrap(),

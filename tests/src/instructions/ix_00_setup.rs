@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use anchor_client::solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -39,11 +39,15 @@ pub fn ensure_token(
         let mint_clone = token.base_mint.insecure_clone();
         (creator_clone, mint_clone, ata)
     } else {
-        let creator = Keypair::new();
-        let base_mint = Keypair::new();
+        let creator = Arc::new(Keypair::new());
+        let base_mint = Arc::new(Keypair::new());
 
         ctx.airdrop(&creator.pubkey(), 100).expect("");
-        let base_mint = ctx.create_spl_token(Some(&creator), Some(base_mint), amount);
+        let base_mint = Arc::new(ctx.create_spl_token(
+            Some(&creator),
+            Some(base_mint.insecure_clone()),
+            amount,
+        ));
 
         // Get the associated token address for the creator
         let ata = get_associated_token_address(&creator.pubkey(), &base_mint.pubkey());
@@ -58,10 +62,10 @@ pub fn ensure_token(
                 quote_mint,
                 pool_config,
                 pos_mints: HashMap::from([
-                    ("initial".to_string(), Keypair::new()),
-                    ("initialize".to_string(), Keypair::new()),
+                    ("initial".to_string(), Arc::new(Keypair::new())),
+                    ("initialize".to_string(), Arc::new(Keypair::new())),
                 ]),
-                vault: Keypair::new(),
+                vault: Arc::new(Keypair::new()),
                 investors: vec![],
             },
         );
@@ -135,13 +139,13 @@ fn test_01_create_tollgate_token() {
     )
     .expect("");
 
-    let investors_rand = rand_investors_num(8..12);
+    let investors_rand = rand_investors_num(80..160);
     let mut investors = vec![];
     for _ in 1..=investors_rand {
         let mut signers = vec![];
         let investor = Investor {
-            key: Keypair::new(),
-            stream: Keypair::new(),
+            key: Arc::new(Keypair::new()),
+            stream: Arc::new(Keypair::new()),
         };
         signers.push(creator.insecure_clone());
         signers.push(investor.stream.insecure_clone());

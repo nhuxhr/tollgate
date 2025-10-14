@@ -8,6 +8,7 @@ pub struct Policy {
     pub vault: Pubkey,               // Associated vault
     pub creator: Pubkey,             // Creator pubkey that receives remainder
     pub quote_mint: Pubkey,          // Quote mint of the associated pool
+    pub investor_count: u32,         // Investor count
     pub init_investor_ata: bool,     // Initialize investor ATA if needed
     pub investor_fee_share_bps: u16, // e.g., 7000 for 70%
     pub min_payout_lamports: u64,    // Dust threshold
@@ -62,6 +63,7 @@ impl Policy {
         self.vault = vault;
         self.creator = creator;
         self.quote_mint = quote_mint;
+        self.investor_count = params.investor_count;
         self.init_investor_ata = params.init_investor_ata;
         self.investor_fee_share_bps = params.investor_fee_share_bps;
         self.min_payout_lamports = params.min_payout_lamports;

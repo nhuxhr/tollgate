@@ -54,7 +54,7 @@ These dumped programs and accounts are then loaded into the LiteSVM context in t
 
 #### Test Video
 
-[![Test Video](https://img.youtube.com/vi/KCyhYAQ1L2g/0.jpg)](https://www.youtube.com/watch?v=KCyhYAQ1L2g)
+[![Test Video](https://img.youtube.com/vi/orGMnYNNc-M/0.jpg)](https://www.youtube.com/watch?v=orGMnYNNc-M)
 
 ## Integration Steps
 
@@ -68,6 +68,7 @@ The `initialize` instruction is used to initialize the policy and progress accou
 
 | **Parameter**            | **Type**      | **Description**                                              |
 | ------------------------ | ------------- | ------------------------------------------------------------ |
+| `investor_count`         | `u32`         | The total number of investors.                               |
 | `init_investor_ata`      | `bool`        | A boolean indicating whether to initialize the investor ATA. |
 | `investor_fee_share_bps` | `u16`         | The investor fee share BPS.                                  |
 | `min_payout_lamports`    | `u64`         | The minimum payout lamports.                                 |
@@ -116,6 +117,7 @@ let initialize_instruction = Instruction::new_with_borsh(
         system_program: system_program_account,
    },
     tollgate::instruction::InitializeParams {
+        investor_count: 100,
         init_investor_ata: true,
         investor_fee_share_bps: 5000,
         min_payout_lamports: 1000000,
@@ -127,12 +129,11 @@ let initialize_instruction = Instruction::new_with_borsh(
 
 ### Step 2: Crank
 
-The `crank` instruction is used to crank the daily distribution.
+The `crank` instruction is used to crank the daily distribution. The page size is dynamically determined by the number of investor account pairs provided in `remaining_accounts` (pairs of stream and investor ATA accounts).
 
-| **Parameter** | **Type** | **Description**                                            |
-| ------------- | -------- | ---------------------------------------------------------- |
-| `cursor`      | `u32`    | The cursor that will be used to paginate the investors.    |
-| `page_size`   | `u32`    | The page size that will be used to paginate the investors. |
+| **Parameter** | **Type** | **Description**                                         |
+| ------------- | -------- | ------------------------------------------------------- |
+| `cursor`      | `u32`    | The cursor that will be used to paginate the investors. |
 
 | Account                    | Constraint                                            | Description                                           |
 | -------------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
@@ -157,6 +158,8 @@ The `crank` instruction is used to crank the daily distribution.
 | `amm_program`              | `address = damm_v2::ID`                               | The DAMM v2 AMM program account.                      |
 | `associated_token_program` | -                                                     | The associated token program account.                 |
 | `system_program`           | -                                                     | The system program account.                           |
+
+**Remaining Accounts**: Provide pairs of (stream account, investor ATA account) for the investors to process in this page. The number of pairs determines the page size.
 
 ```rust
 // Crank the daily distribution
@@ -188,7 +191,6 @@ let crank_instruction = Instruction::new_with_borsh(
     },
     tollgate::instruction::CrankParams {
         cursor: 0,
-        page_size: 10,
     },
 );
 ```
@@ -206,6 +208,7 @@ The policy account is used to store the policy state.
 | `vault`                  | `Pubkey`      | The vault account that will be used to create the policy and progress accounts. |
 | `creator`                | `Pubkey`      | The creator account that will receive the remainder of the fees.                |
 | `quote_mint`             | `Pubkey`      | The quote mint account that will be used to distribute fees to investors.       |
+| `investor_count`         | `u32`         | The total number of investors.                                                  |
 | `init_investor_ata`      | `bool`        | A boolean indicating whether to initialize the investor ATA.                    |
 | `investor_fee_share_bps` | `u16`         | The investor fee share BPS.                                                     |
 | `min_payout_lamports`    | `u64`         | The minimum payout lamports.                                                    |
@@ -283,9 +286,9 @@ The pagination cursor is used to paginate the investors.
 
 ### Page Size
 
-The page size is used to determine the number of investors to distribute fees to per page.
+The page size is dynamically determined by the number of investor account pairs provided in `remaining_accounts` during the crank instruction.
 
-- **Page Size**: The page size that will be used to paginate the investors.
+- **Page Size**: The number of investors to process in the current crank call, based on provided accounts.
 
 ### Page Payouts
 
@@ -313,7 +316,7 @@ If Distributable < min_payout_lamports:
   - Carry over to next day
   |
   v
-Process Investor Payout Page
+Process Investor Payout Page (based on provided remaining_accounts)
   - Update daily_spent and cursor
   - Emit InvestorPayoutPage event
   |
@@ -334,10 +337,10 @@ The following diagram illustrates the pagination flow during the crank instructi
 Start Pagination
   |
   v
-Get Investor Accounts (remaining_accounts)
+Get Investor Accounts (from remaining_accounts)
   |
   v
-Calculate Page Size (min(page_size, remaining investors))
+Calculate Page Size (number of provided investor pairs)
   |
   v
 Process Page
@@ -356,7 +359,7 @@ If Yes:
   |
   v
 If No:
-  - Continue to next page
+  - Continue to next page (via subsequent crank calls)
   |
   v
 End Pagination
@@ -447,7 +450,7 @@ The investor payout page has been processed.
 | `position`   | `Pubkey` | The position account that was created.                   |
 | `owner`      | `Pubkey` | The owner account that was used to sign the transaction. |
 | `cursor`     | `u32`    | The cursor that was used to paginate the investors.      |
-| `investors`  | `u32`    | The number of investors that were processed.             |
+| `investors`  | `u32`    | The number of investors processed in this page.          |
 | `page_start` | `u32`    | The starting page number.                                |
 | `page_end`   | `u32`    | The ending page number.                                  |
 | `payout`     | `u64`    | The total payout that was processed.                     |

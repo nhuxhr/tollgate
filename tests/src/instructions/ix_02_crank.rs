@@ -105,6 +105,8 @@ pub fn compute_crank_ix_accs<'a>(
     key: &str,
     pos_key: &str,
     payer: Pubkey,
+    start_page: u32,
+    end_page: u32,
 ) -> (&'a Token, (impl ToAccountMetas, Vec<AccountMeta>)) {
     let key = String::from(key);
     let token = ctx.tokens.get(&key).expect("");
@@ -117,10 +119,11 @@ pub fn compute_crank_ix_accs<'a>(
     let pool_authority = damm_v2_constants::pool_authority::ID;
 
     let mut remaining_accounts = vec![];
-    for i in token.investors.iter() {
-        remaining_accounts.push(AccountMeta::new_readonly(i.stream.pubkey(), false));
+    for idx in start_page..end_page {
+        let investor = token.investors.get(idx as usize).expect("");
+        remaining_accounts.push(AccountMeta::new_readonly(investor.stream.pubkey(), false));
         remaining_accounts.push(AccountMeta::new(
-            get_associated_token_address(&i.key.pubkey(), &quote_mint),
+            get_associated_token_address(&investor.key.pubkey(), &quote_mint),
             false,
         ));
     }
@@ -147,7 +150,7 @@ fn test_01_crank_below_min_payout() {
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
-    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 10);
     let base_mint = token.base_mint.pubkey();
     let quote_mint = token.quote_mint;
     let pool_authority = damm_v2_constants::pool_authority::ID;
@@ -169,10 +172,7 @@ fn test_01_crank_below_min_payout() {
             crank_ix(
                 accounts.0,
                 tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 0,
-                        page_size: 2,
-                    },
+                    params: tollgate::instructions::CrankParams { cursor: 0 },
                 },
                 accounts.1,
             ),
@@ -189,7 +189,7 @@ fn test_02_should_failed_base_fee_detected() {
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 10);
 
     set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(1), None);
 
@@ -197,10 +197,7 @@ fn test_02_should_failed_base_fee_detected() {
         &[crank_ix(
             accounts.0,
             tollgate::instruction::Crank {
-                params: tollgate::instructions::CrankParams {
-                    cursor: 0,
-                    page_size: 2,
-                },
+                params: tollgate::instructions::CrankParams { cursor: 0 },
             },
             accounts.1,
         )],
@@ -219,16 +216,13 @@ fn test_03_crank_claim_quote_fees() {
 
     ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
     set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(LAMPORTS_PER_SOL));
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 0);
 
     ctx.send_transaction(
         &[crank_ix(
             accounts.0,
             tollgate::instruction::Crank {
-                params: tollgate::instructions::CrankParams {
-                    cursor: 0,
-                    page_size: 0,
-                },
+                params: tollgate::instructions::CrankParams { cursor: 0 },
             },
             accounts.1,
         )],
@@ -246,59 +240,34 @@ fn test_04_create_investors_ata() {
     let mut ctx = TestContext::default();
     let key = "tollgate";
     let payer = get_payer();
-    let token = ctx.tokens.get(key).expect("");
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("");
 
     // TODO: let program init ATA when needed per policy (this will require additional investor pubkey)
-    let mut create_ata_ixs = vec![];
-    for i in token.investors.iter() {
-        create_ata_ixs.push(create_associated_token_account_idempotent(
-            &payer.pubkey(),
-            &i.key.pubkey(),
-            &token.quote_mint,
-            &spl_token::ID,
-        ));
+    for chunk in token.investors.chunks(10) {
+        let mut create_ata_ixs = vec![];
+        for investor in chunk.iter() {
+            create_ata_ixs.push(create_associated_token_account_idempotent(
+                &payer.pubkey(),
+                &investor.key.pubkey(),
+                &token.quote_mint,
+                &spl_token::ID,
+            ));
+        }
+        ctx.send_transaction(create_ata_ixs.as_slice(), Some(&payer.pubkey()), &[payer])
+            .expect("");
     }
-    ctx.send_transaction(create_ata_ixs.as_slice(), Some(&payer.pubkey()), &[payer])
-        .expect("");
 }
 
 #[test]
-fn test_05_crank_page_0_to_3() {
+fn test_05_crank_page_0_to_10() {
     let mut ctx = TestContext::default();
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
 
     set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(LAMPORTS_PER_SOL / 2));
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
-
-    ctx.send_transaction(
-        &[crank_ix(
-            accounts.0,
-            tollgate::instruction::Crank {
-                params: tollgate::instructions::CrankParams {
-                    cursor: 0,
-                    page_size: 3,
-                },
-            },
-            accounts.1,
-        )],
-        Some(&payer.pubkey()),
-        &[payer],
-    )
-    .expect("");
-
-    log_progress_account(&ctx, key);
-}
-
-#[test]
-fn test_06_crank_page_0_to_3_idempotent() {
-    let mut ctx = TestContext::default();
-    let key = "tollgate";
-    let pos_key = "initialize";
-    let payer = get_payer();
-
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 10);
 
     ctx.send_transaction(
         &[
@@ -306,10 +275,7 @@ fn test_06_crank_page_0_to_3_idempotent() {
             crank_ix(
                 accounts.0,
                 tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 0,
-                        page_size: 3,
-                    },
+                    params: tollgate::instructions::CrankParams { cursor: 0 },
                 },
                 accounts.1,
             ),
@@ -323,22 +289,47 @@ fn test_06_crank_page_0_to_3_idempotent() {
 }
 
 #[test]
-fn test_07_crank_page_3_to_5() {
+fn test_06_crank_page_0_to_10_idempotent() {
     let mut ctx = TestContext::default();
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
 
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 10);
+
+    ctx.send_transaction(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_price(2), // Use as a nonce
+            crank_ix(
+                accounts.0,
+                tollgate::instruction::Crank {
+                    params: tollgate::instructions::CrankParams { cursor: 0 },
+                },
+                accounts.1,
+            ),
+        ],
+        Some(&payer.pubkey()),
+        &[payer],
+    )
+    .expect("");
+
+    log_progress_account(&ctx, key);
+}
+
+#[test]
+fn test_07_crank_page_10_to_20() {
+    let mut ctx = TestContext::default();
+    let key = "tollgate";
+    let pos_key = "initialize";
+    let payer = get_payer();
+
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 10, 20);
 
     ctx.send_transaction(
         &[crank_ix(
             accounts.0,
             tollgate::instruction::Crank {
-                params: tollgate::instructions::CrankParams {
-                    cursor: 3,
-                    page_size: 2,
-                },
+                params: tollgate::instructions::CrankParams { cursor: 10 },
             },
             accounts.1,
         )],
@@ -351,23 +342,20 @@ fn test_07_crank_page_3_to_5() {
 }
 
 #[test]
-fn test_08_crank_day_two_page_2_to_5_invalid_cursor() {
+fn test_08_crank_day_two_page_1_to_5_invalid_cursor() {
     let mut ctx = TestContext::default();
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
 
     ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 1, 6);
 
     ctx.send_transaction(
         &[crank_ix(
             accounts.0,
             tollgate::instruction::Crank {
-                params: tollgate::instructions::CrankParams {
-                    cursor: 2,
-                    page_size: 3,
-                },
+                params: tollgate::instructions::CrankParams { cursor: 1 },
             },
             accounts.1,
         )],
@@ -380,13 +368,13 @@ fn test_08_crank_day_two_page_2_to_5_invalid_cursor() {
 }
 
 #[test]
-fn test_09_crank_day_two_page_0_to_4() {
+fn test_09_crank_day_two_page_0_to_8() {
     let mut ctx = TestContext::default();
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
 
-    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let (_, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), 0, 8);
 
     ctx.send_transaction(
         &[
@@ -394,10 +382,7 @@ fn test_09_crank_day_two_page_0_to_4() {
             crank_ix(
                 accounts.0,
                 tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 0,
-                        page_size: 4,
-                    },
+                    params: tollgate::instructions::CrankParams { cursor: 0 },
                 },
                 accounts.1,
             ),
@@ -417,26 +402,46 @@ fn test_10_crank_day_two_full() {
     let pos_key = "initialize";
     let payer = get_payer();
 
-    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("");
+    let investors = token.investors.split_at(8).1.chunks(10);
 
-    ctx.send_transaction(
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
-            crank_ix(
-                accounts.0,
-                tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 4,
-                        page_size: token.investors.len() as u32 - 4,
+    for (idx, chunk) in investors.clone().enumerate() {
+        let len = chunk.len();
+        let start_page = if idx + 1 == investors.len() {
+            8 + ((investors.len() - 1) * 10)
+        } else {
+            8 + (idx * len)
+        };
+        let end_page = start_page + len;
+
+        let (_, accounts) = compute_crank_ix_accs(
+            &ctx,
+            key,
+            pos_key,
+            payer.pubkey(),
+            start_page as u32,
+            end_page as u32,
+        );
+
+        ctx.send_transaction(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
+                crank_ix(
+                    accounts.0,
+                    tollgate::instruction::Crank {
+                        params: tollgate::instructions::CrankParams {
+                            cursor: start_page as u32,
+                        },
                     },
-                },
-                accounts.1,
-            ),
-        ],
-        Some(&payer.pubkey()),
-        &[payer],
-    )
-    .expect("");
+                    accounts.1,
+                ),
+            ],
+            Some(&payer.pubkey()),
+            &[payer],
+        )
+        .expect("");
+    }
 
     log_progress_account(&ctx, key);
 }
@@ -448,7 +453,12 @@ fn test_11_crank_day_two_full_idempotent() {
     let pos_key = "initialize";
     let payer = get_payer();
 
-    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("");
+    let start_page = token.investors.len() as u32 - 10;
+    let end_page = token.investors.len() as u32;
+    let (_, accounts) =
+        compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey(), start_page, end_page);
 
     ctx.send_transaction(
         &[
@@ -457,10 +467,7 @@ fn test_11_crank_day_two_full_idempotent() {
             crank_ix(
                 accounts.0,
                 tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 4,
-                        page_size: token.investors.len() as u32 - 4,
-                    },
+                    params: tollgate::instructions::CrankParams { cursor: start_page },
                 },
                 accounts.1,
             ),
@@ -488,26 +495,47 @@ fn test_12_crank_day_three_full() {
         Some(0),
         Some((LAMPORTS_PER_SOL as f64 / 1.6) as u64),
     );
-    let (token, accounts) = compute_crank_ix_accs(&ctx, key, pos_key, payer.pubkey());
 
-    ctx.send_transaction(
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
-            crank_ix(
-                accounts.0,
-                tollgate::instruction::Crank {
-                    params: tollgate::instructions::CrankParams {
-                        cursor: 0,
-                        page_size: token.investors.len() as u32,
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("");
+    let investors = token.investors.chunks(10);
+
+    for (idx, chunk) in investors.clone().enumerate() {
+        let len = chunk.len();
+        let start_page = if idx + 1 == investors.len() {
+            (investors.len() - 1) * 10
+        } else {
+            idx * len
+        };
+        let end_page = start_page + len;
+
+        let (_, accounts) = compute_crank_ix_accs(
+            &ctx,
+            key,
+            pos_key,
+            payer.pubkey(),
+            start_page as u32,
+            end_page as u32,
+        );
+
+        ctx.send_transaction(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(5_000_000),
+                crank_ix(
+                    accounts.0,
+                    tollgate::instruction::Crank {
+                        params: tollgate::instructions::CrankParams {
+                            cursor: start_page as u32,
+                        },
                     },
-                },
-                accounts.1,
-            ),
-        ],
-        Some(&payer.pubkey()),
-        &[payer],
-    )
-    .expect("");
+                    accounts.1,
+                ),
+            ],
+            Some(&payer.pubkey()),
+            &[payer],
+        )
+        .expect("");
+    }
 
     log_progress_account(&ctx, key);
 }
