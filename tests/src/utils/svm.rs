@@ -10,15 +10,16 @@ use anchor_client::{
     anchor_lang::AccountDeserialize,
     solana_sdk::{
         account::Account,
-        instruction::Instruction,
+        instruction::{Instruction, InstructionError},
         native_token::LAMPORTS_PER_SOL,
         program_option::COption,
         program_pack::Pack,
         pubkey::Pubkey,
         signature::{read_keypair_file, Keypair},
         signer::Signer,
-        system_instruction, system_program,
-        transaction::Transaction,
+        system_instruction::{self, SystemError},
+        system_program,
+        transaction::{Transaction, TransactionError},
     },
 };
 use anchor_spl::{
@@ -36,11 +37,15 @@ use litesvm::{
     types::{FailedTransactionMetadata, TransactionMetadata},
     LiteSVM,
 };
+use num_traits::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 use solana_clock::Clock;
+use tollgate::error::TollgateError;
 
 use crate::constants::{SOL_MINT, USDC_MINT};
+
+pub type TransactionResult = Result<TransactionMetadata, Box<FailedTransactionMetadata>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,7 +284,7 @@ impl TestContext {
         instructions: &[Instruction],
         payer: Option<&Pubkey>,
         signers: &[&Keypair],
-    ) -> Result<TransactionMetadata, Box<FailedTransactionMetadata>> {
+    ) -> TransactionResult {
         // Create and sign transaction
         let mut transaction = Transaction::new_with_payer(instructions, payer);
         transaction.sign(signers, self.svm.latest_blockhash());
@@ -346,5 +351,76 @@ impl TestContext {
             .expect("Failed to process transaction");
 
         mint // Return the mint's keypair
+    }
+}
+
+pub fn get_ix_err(err: TollgateError) -> InstructionError {
+    InstructionError::Custom(6000 + err as u32)
+}
+
+pub fn demand_logs_contain(expected: &str, result: &TransactionResult) {
+    let logs = match &result {
+        Ok(meta) => &meta.logs,
+        Err(meta) => &meta.meta.logs,
+    };
+
+    if logs.iter().any(|log| log.contains(expected)) {
+        return;
+    }
+
+    panic!(
+        "Expected {:?} among {} log entries: {}",
+        expected,
+        logs.len(),
+        logs.iter()
+            .enumerate()
+            .map(|(i, log)| format!("[{}]: {}", i, log))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+pub fn demand_instruction_error(expected_error: InstructionError, result: &TransactionResult) {
+    let Err(e) = result else {
+        panic!("Expected {} but transaction succeeded", expected_error);
+    };
+
+    let TransactionError::InstructionError(_, observed_error) = &e.err else {
+        panic!("Expected {} but got: {}", expected_error, e.err);
+    };
+
+    if *observed_error != expected_error {
+        panic!("Expected {} but got {}", expected_error, observed_error);
+    }
+}
+
+pub fn demand_transaction_error(expected: TransactionError, result: &TransactionResult) {
+    let Err(e) = result else {
+        panic!("Expected {} but transaction succeeded", expected);
+    };
+
+    if e.err != expected {
+        panic!("Expected {} but got {}", expected, e.err);
+    }
+}
+
+pub fn demand_system_error(expected_error: SystemError, result: &TransactionResult) {
+    let Err(e) = &result else {
+        panic!("Expected {} but transaction succeeded", expected_error);
+    };
+
+    let TransactionError::InstructionError(_, InstructionError::Custom(observed_code)) = &e.err
+    else {
+        panic!("Expected {} but got: {}", expected_error, e.err);
+    };
+
+    let Some(observed_error) = SystemError::from_u64(*observed_code as u64) else {
+        panic!(
+            "Expected {} but got invalid code {}",
+            expected_error, observed_code
+        );
+    };
+
+    if observed_error != expected_error {
+        panic!("Expected {} but got: {}", expected_error, observed_error);
     }
 }

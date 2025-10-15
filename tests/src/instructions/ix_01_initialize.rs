@@ -8,12 +8,13 @@ use tollgate::{
     constants::{
         damm_v2_constants, INVESTOR_FEE_POS_OWNER, POLICY_SEED, PROGRESS_SEED, VAULT_SEED,
     },
+    error::TollgateError,
 };
 
 use crate::utils::{
     damm_v2::{get_pool_with_config_pda, get_position_nft_account_pda, get_position_pda},
     find_program_address, find_program_event_authority,
-    svm::{get_payer, TestContext},
+    svm::{demand_instruction_error, demand_logs_contain, get_ix_err, get_payer, TestContext},
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -72,7 +73,7 @@ fn test_01_should_failed_base_fee_detected() {
     let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
     let (position, _) = get_position_pda(pos_mint.pubkey());
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[initialize_ix(
             get_initialize_ix_accs(
                 token.vault.pubkey(),
@@ -88,7 +89,7 @@ fn test_01_should_failed_base_fee_detected() {
             ),
             tollgate::instruction::Initialize {
                 params: tollgate::instructions::InitializeParams {
-                    investor_count: token.investors.len() as u32,
+                    investor_count: (token.investors.len() as u32).max(1),
                     init_investor_ata: false,
                     investor_fee_share_bps: 10,
                     min_payout_lamports: 1,
@@ -103,8 +104,9 @@ fn test_01_should_failed_base_fee_detected() {
             &pos_mint.insecure_clone(),
             payer,
         ],
-    )
-    .expect_err("Transaction should fail due to base fee detection");
+    );
+
+    demand_instruction_error(get_ix_err(TollgateError::PoolNotQuoteOnlyFees), &result);
 }
 
 #[test]
@@ -123,7 +125,7 @@ fn test_02_initialize() {
     let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
     let (position, _) = get_position_pda(pos_mint.pubkey());
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[initialize_ix(
             get_initialize_ix_accs(
                 token.vault.pubkey(),
@@ -154,6 +156,9 @@ fn test_02_initialize() {
             &pos_mint.insecure_clone(),
             payer,
         ],
-    )
-    .expect("Initialization should succeed");
+    );
+
+    demand_logs_contain("Initialize::Initializing policy account", &result);
+    demand_logs_contain("Initialize::Initializing progress account", &result);
+    demand_logs_contain("Initialize::Initialization completed successfully", &result);
 }

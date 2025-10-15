@@ -20,6 +20,7 @@ use tollgate::{
         damm_v2_constants, INVESTOR_FEE_POS_OWNER, POLICY_SEED, PROGRESS_SEED, TWENTY_FOUR_HOURS,
         VAULT_SEED,
     },
+    error::TollgateError,
     state::Policy,
 };
 
@@ -29,7 +30,9 @@ use crate::utils::{
         get_token_vault_pda, set_damm_v2_position_fees,
     },
     find_program_address, find_program_event_authority, log_policy_account, log_progress_account,
-    svm::{get_payer, TestContext, Token},
+    svm::{
+        demand_instruction_error, demand_logs_contain, get_ix_err, get_payer, TestContext, Token,
+    },
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -182,7 +185,7 @@ fn test_01_crank_below_min_payout() {
     let quote_mint = token.quote_mint;
     let pool_authority = damm_v2_constants::pool_authority::ID;
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             create_associated_token_account_idempotent(
                 &payer.pubkey(),
@@ -206,8 +209,14 @@ fn test_01_crank_below_min_payout() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Crank below min payout should succeed");
+    );
+
+    demand_logs_contain("Crank::Processing day state: New", &result);
+    demand_logs_contain("Crank::Distributable amount after carry: 0", &result);
+    demand_logs_contain(
+        "Crank::Distributable below min payout, carrying over: 0",
+        &result,
+    );
 }
 
 #[test]
@@ -220,7 +229,7 @@ fn test_02_should_failed_base_fee_detected() {
 
     set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(1), None);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[crank_ix(
             accs.0,
             tollgate::instruction::Crank {
@@ -230,8 +239,9 @@ fn test_02_should_failed_base_fee_detected() {
         )],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect_err("Transaction should fail due to base fee detection");
+    );
+
+    demand_instruction_error(get_ix_err(TollgateError::BaseDenominatedFees), &result);
 }
 
 #[test]
@@ -240,12 +250,13 @@ fn test_03_crank_claim_quote_fees() {
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
+    let quote_fee = LAMPORTS_PER_SOL;
 
     ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
-    set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(LAMPORTS_PER_SOL));
+    set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(quote_fee));
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, false, payer.pubkey(), 0, 0);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[crank_ix(
             accs.0,
             tollgate::instruction::Crank {
@@ -255,8 +266,26 @@ fn test_03_crank_claim_quote_fees() {
         )],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Crank should claim quote fees successfully");
+    );
+
+    demand_logs_contain(
+        "Crank::Starting crank with cursor=0 and page_size=0",
+        &result,
+    );
+    demand_logs_contain("Crank::Processing day state: New", &result);
+    demand_logs_contain(
+        format!(
+            "Crank::Claiming DAMM v2 position fee: quote_fee={}",
+            quote_fee
+        )
+        .as_str(),
+        &result,
+    );
+    demand_logs_contain(
+        format!("Crank::Distributable amount after carry: {}", quote_fee).as_str(),
+        &result,
+    );
+    demand_logs_contain("Crank::No investors to process, exiting", &result);
 
     log_policy_account(&ctx, key);
     log_progress_account(&ctx, key);
@@ -294,7 +323,7 @@ fn test_05_crank_page_0_to_10() {
     set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(LAMPORTS_PER_SOL / 2));
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, false, payer.pubkey(), 0, 10);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             ComputeBudgetInstruction::set_compute_unit_price(1), // Use as a nonce
             crank_ix(
@@ -307,8 +336,19 @@ fn test_05_crank_page_0_to_10() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Crank page 0 to 10 should succeed");
+    );
+
+    demand_logs_contain("Crank::Processing day state: Same", &result);
+    demand_logs_contain(
+        format!(
+            "Crank::Distributable amount after carry: {}",
+            LAMPORTS_PER_SOL
+        )
+        .as_str(),
+        &result,
+    );
+    demand_logs_contain("Crank::Processed page 0 to 10", &result);
+    demand_logs_contain("Crank::Completed successfully", &result);
 
     log_progress_account(&ctx, key);
 }
@@ -322,7 +362,7 @@ fn test_06_crank_page_0_to_10_idempotent() {
 
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, false, payer.pubkey(), 0, 10);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             ComputeBudgetInstruction::set_compute_unit_price(2), // Use as a nonce
             crank_ix(
@@ -335,8 +375,10 @@ fn test_06_crank_page_0_to_10_idempotent() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Idempotent crank page 0 to 10 should succeed");
+    );
+
+    demand_logs_contain("Crank::Processing day state: Same", &result);
+    demand_logs_contain("Crank::Cursor behind progress, skipping", &result);
 
     log_progress_account(&ctx, key);
 }
@@ -350,7 +392,7 @@ fn test_07_crank_page_10_to_20() {
 
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, true, payer.pubkey(), 10, 20);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(500_000),
             crank_with_init_ix(
@@ -363,8 +405,11 @@ fn test_07_crank_page_10_to_20() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Crank page 10 to 20 should succeed");
+    );
+
+    demand_logs_contain("Crank::Processing day state: Same", &result);
+    demand_logs_contain("Crank::Distributable amount after carry: ", &result);
+    result.expect("Crank page 10 to 20 should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -379,7 +424,7 @@ fn test_08_crank_day_two_page_1_to_5_invalid_cursor() {
     ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, true, payer.pubkey(), 1, 6);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[crank_with_init_ix(
             accs.0,
             tollgate::instruction::CrankWithInit {
@@ -389,8 +434,18 @@ fn test_08_crank_day_two_page_1_to_5_invalid_cursor() {
         )],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect_err("Invalid cursor crank should fail");
+    );
+
+    demand_logs_contain(
+        "Crank::Starting crank with cursor=1 and page_size=5",
+        &result,
+    );
+    demand_logs_contain(
+        "Crank::Transferred previous day remainder to creator: ",
+        &result,
+    );
+    demand_logs_contain("Crank::Processing day state: New", &result);
+    demand_instruction_error(get_ix_err(TollgateError::PaginationCursorTooLarge), &result);
 
     log_progress_account(&ctx, key);
 }
@@ -404,7 +459,7 @@ fn test_09_crank_day_two_page_0_to_8() {
 
     let (_, accs) = compute_crank_ix_accs(&ctx, key, pos_key, true, payer.pubkey(), 0, 8);
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(600_000),
             crank_with_init_ix(
@@ -417,8 +472,32 @@ fn test_09_crank_day_two_page_0_to_8() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Crank day two page 0 to 8 should succeed");
+    );
+
+    let quote_fee = LAMPORTS_PER_SOL / 2;
+    demand_logs_contain(
+        "Crank::Starting crank with cursor=0 and page_size=8",
+        &result,
+    );
+    demand_logs_contain(
+        "Crank::Transferred previous day remainder to creator: ",
+        &result,
+    );
+    demand_logs_contain("Crank::Processing day state: New", &result);
+    demand_logs_contain(
+        format!(
+            "Crank::Claiming DAMM v2 position fee: quote_fee={}",
+            quote_fee
+        )
+        .as_str(),
+        &result,
+    );
+    demand_logs_contain(
+        format!("Crank::Distributable amount after carry: {}", quote_fee).as_str(),
+        &result,
+    );
+    demand_logs_contain("Crank::Processed page 0 to 8, payouts: ", &result);
+    demand_logs_contain("Crank::Completed successfully", &result);
 
     log_progress_account(&ctx, key);
 }
@@ -453,7 +532,7 @@ fn test_10_crank_day_two_full() {
             end_page as u32,
         );
 
-        ctx.send_transaction(
+        let result = ctx.send_transaction(
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(700_000),
                 crank_with_init_ix(
@@ -468,8 +547,19 @@ fn test_10_crank_day_two_full() {
             ],
             Some(&payer.pubkey()),
             &[payer],
-        )
-        .expect("Crank day two full should succeed");
+        );
+
+        demand_logs_contain(
+            format!(
+                "Crank::Starting crank with cursor={} and page_size={}",
+                start_page, len
+            )
+            .as_str(),
+            &result,
+        );
+        demand_logs_contain("Crank::Processing day state: Same", &result);
+        demand_logs_contain("Crank::Distributable amount after carry: ", &result);
+        result.expect("Crank day two full should succeed");
     }
 
     log_progress_account(&ctx, key);
@@ -496,7 +586,7 @@ fn test_11_crank_day_two_full_idempotent() {
         end_page,
     );
 
-    ctx.send_transaction(
+    let result = ctx.send_transaction(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(800_000),
             crank_with_init_ix(
@@ -509,8 +599,17 @@ fn test_11_crank_day_two_full_idempotent() {
         ],
         Some(&payer.pubkey()),
         &[payer],
-    )
-    .expect("Idempotent crank day two full should succeed");
+    );
+
+    demand_logs_contain(
+        format!(
+            "Crank::Starting crank with cursor={} and page_size=10",
+            start_page
+        )
+        .as_str(),
+        &result,
+    );
+    demand_logs_contain("Crank::Day is closed, skipping", &result);
 
     log_progress_account(&ctx, key);
 }
@@ -521,15 +620,10 @@ fn test_12_crank_day_three_full() {
     let key = "tollgate";
     let pos_key = "initialize";
     let payer = get_payer();
+    let quote_fee = (LAMPORTS_PER_SOL as f64 / 1.6) as u64;
 
     ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
-    set_damm_v2_position_fees(
-        &mut ctx,
-        key,
-        pos_key,
-        Some(0),
-        Some((LAMPORTS_PER_SOL as f64 / 1.6) as u64),
-    );
+    set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(quote_fee));
 
     let tokens = ctx.tokens.clone();
     let token = tokens.get(key).expect("Token not found in context");
@@ -554,7 +648,7 @@ fn test_12_crank_day_three_full() {
             end_page as u32,
         );
 
-        ctx.send_transaction(
+        let result = ctx.send_transaction(
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(900_000),
                 crank_with_init_ix(
@@ -569,8 +663,23 @@ fn test_12_crank_day_three_full() {
             ],
             Some(&payer.pubkey()),
             &[payer],
-        )
-        .expect("Crank day three full should succeed");
+        );
+
+        demand_logs_contain(
+            format!(
+                "Crank::Starting crank with cursor={} and page_size={}",
+                start_page, len
+            )
+            .as_str(),
+            &result,
+        );
+        if idx == 0 {
+            demand_logs_contain("Crank::Processing day state: New", &result);
+        } else {
+            demand_logs_contain("Crank::Processing day state: Same", &result);
+        }
+        demand_logs_contain("Crank::Distributable amount after carry: ", &result);
+        result.expect("Crank day three full should succeed");
     }
 
     log_progress_account(&ctx, key);
