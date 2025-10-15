@@ -61,10 +61,13 @@ fn test_01_should_failed_base_fee_detected() {
     let mut ctx = TestContext::default();
     let payer = get_payer();
     let key = String::from("coh");
-    let token = ctx.tokens.get(&key).expect("");
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
     let base_mint = token.base_mint.pubkey();
     let quote_mint = token.quote_mint;
-    let pos_mint = token.pos_mints.get("initialize").unwrap();
+    let pos_mint = token
+        .pos_mints
+        .get("initialize")
+        .expect("Position mint not found in context");
     let (position_nft_account, _) = get_position_nft_account_pda(pos_mint.pubkey());
     let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
     let (position, _) = get_position_pda(pos_mint.pubkey());
@@ -101,7 +104,7 @@ fn test_01_should_failed_base_fee_detected() {
             payer,
         ],
     )
-    .expect_err("");
+    .expect_err("Transaction should fail due to base fee detection");
 }
 
 #[test]
@@ -109,10 +112,13 @@ fn test_02_initialize() {
     let mut ctx = TestContext::default();
     let payer = get_payer();
     let key = String::from("tollgate");
-    let token = ctx.tokens.get(&key).expect("");
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
     let base_mint = token.base_mint.pubkey();
     let quote_mint = token.quote_mint;
-    let pos_mint = token.pos_mints.get("initialize").unwrap();
+    let pos_mint = token
+        .pos_mints
+        .get("initialize")
+        .expect("Position mint not found in context");
     let (position_nft_account, _) = get_position_nft_account_pda(pos_mint.pubkey());
     let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
     let (position, _) = get_position_pda(pos_mint.pubkey());
@@ -149,5 +155,5 @@ fn test_02_initialize() {
             payer,
         ],
     )
-    .expect("");
+    .expect("Initialization should succeed");
 }

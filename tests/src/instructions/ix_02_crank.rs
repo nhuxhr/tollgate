@@ -49,8 +49,14 @@ pub fn get_crank_ix_accs(
     let owner = find_program_address(&[VAULT_SEED, vault.as_ref(), INVESTOR_FEE_POS_OWNER], None).0;
 
     let policy_program_acc = ctx.get_program_account::<Policy>(&policy);
-    let base_mint_acc = ctx.svm.get_account(&base_mint).unwrap();
-    let quote_mint_acc = ctx.svm.get_account(&quote_mint).unwrap();
+    let base_mint_acc = ctx
+        .svm
+        .get_account(&base_mint)
+        .expect("Base mint account not found");
+    let quote_mint_acc = ctx
+        .svm
+        .get_account(&quote_mint)
+        .expect("Quote mint account not found");
 
     AccountCrank {
         policy,
@@ -121,10 +127,13 @@ pub fn compute_crank_ix_accs<'a>(
     end_page: u32,
 ) -> (&'a Token, (impl ToAccountMetas, Vec<AccountMeta>)) {
     let key = String::from(key);
-    let token = ctx.tokens.get(&key).expect("");
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
     let base_mint = token.base_mint.pubkey();
     let quote_mint = token.quote_mint;
-    let pos_mint = token.pos_mints.get(pos_key).unwrap();
+    let pos_mint = token
+        .pos_mints
+        .get(pos_key)
+        .expect("Position mint not found in context");
     let (position_nft_account, _) = get_position_nft_account_pda(pos_mint.pubkey());
     let (pool, _) = get_pool_with_config_pda(token.pool_config, base_mint, quote_mint);
     let (position, _) = get_position_pda(pos_mint.pubkey());
@@ -132,7 +141,10 @@ pub fn compute_crank_ix_accs<'a>(
 
     let mut remaining_accounts = vec![];
     for idx in start_page..end_page {
-        let investor = token.investors.get(idx as usize).expect("");
+        let investor = token
+            .investors
+            .get(idx as usize)
+            .expect("Investor not found in token investors");
         if init_mode {
             remaining_accounts.push(AccountMeta::new_readonly(investor.key.pubkey(), false));
         }
@@ -195,7 +207,7 @@ fn test_01_crank_below_min_payout() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Crank below min payout should succeed");
 }
 
 #[test]
@@ -219,7 +231,7 @@ fn test_02_should_failed_base_fee_detected() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect_err("");
+    .expect_err("Transaction should fail due to base fee detection");
 }
 
 #[test]
@@ -244,7 +256,7 @@ fn test_03_crank_claim_quote_fees() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Crank should claim quote fees successfully");
 
     log_policy_account(&ctx, key);
     log_progress_account(&ctx, key);
@@ -256,7 +268,7 @@ fn test_04_create_investors_ata() {
     let key = "tollgate";
     let payer = get_payer();
     let tokens = ctx.tokens.clone();
-    let token = tokens.get(key).expect("");
+    let token = tokens.get(key).expect("Token not found in context");
 
     // Manually init first ten investors ATA to test normal crank IX
     let mut create_ata_ixs = vec![];
@@ -269,7 +281,7 @@ fn test_04_create_investors_ata() {
         ));
     }
     ctx.send_transaction(create_ata_ixs.as_slice(), Some(&payer.pubkey()), &[payer])
-        .expect("");
+        .expect("Creating investors ATA should succeed");
 }
 
 #[test]
@@ -296,7 +308,7 @@ fn test_05_crank_page_0_to_10() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Crank page 0 to 10 should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -324,7 +336,7 @@ fn test_06_crank_page_0_to_10_idempotent() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Idempotent crank page 0 to 10 should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -352,7 +364,7 @@ fn test_07_crank_page_10_to_20() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Crank page 10 to 20 should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -378,7 +390,7 @@ fn test_08_crank_day_two_page_1_to_5_invalid_cursor() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect_err("");
+    .expect_err("Invalid cursor crank should fail");
 
     log_progress_account(&ctx, key);
 }
@@ -406,7 +418,7 @@ fn test_09_crank_day_two_page_0_to_8() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Crank day two page 0 to 8 should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -419,7 +431,7 @@ fn test_10_crank_day_two_full() {
     let payer = get_payer();
 
     let tokens = ctx.tokens.clone();
-    let token = tokens.get(key).expect("");
+    let token = tokens.get(key).expect("Token not found in context");
     let investors = token.investors.split_at(8).1.chunks(10);
 
     for (idx, chunk) in investors.clone().enumerate() {
@@ -457,7 +469,7 @@ fn test_10_crank_day_two_full() {
             Some(&payer.pubkey()),
             &[payer],
         )
-        .expect("");
+        .expect("Crank day two full should succeed");
     }
 
     log_progress_account(&ctx, key);
@@ -471,7 +483,7 @@ fn test_11_crank_day_two_full_idempotent() {
     let payer = get_payer();
 
     let tokens = ctx.tokens.clone();
-    let token = tokens.get(key).expect("");
+    let token = tokens.get(key).expect("Token not found in context");
     let start_page = token.investors.len() as u32 - 10;
     let end_page = token.investors.len() as u32;
     let (_, accs) = compute_crank_ix_accs(
@@ -498,7 +510,7 @@ fn test_11_crank_day_two_full_idempotent() {
         Some(&payer.pubkey()),
         &[payer],
     )
-    .expect("");
+    .expect("Idempotent crank day two full should succeed");
 
     log_progress_account(&ctx, key);
 }
@@ -520,7 +532,7 @@ fn test_12_crank_day_three_full() {
     );
 
     let tokens = ctx.tokens.clone();
-    let token = tokens.get(key).expect("");
+    let token = tokens.get(key).expect("Token not found in context");
     let investors = token.investors.chunks(10);
 
     for (idx, chunk) in investors.clone().enumerate() {
@@ -558,7 +570,7 @@ fn test_12_crank_day_three_full() {
             Some(&payer.pubkey()),
             &[payer],
         )
-        .expect("");
+        .expect("Crank day three full should succeed");
     }
 
     log_progress_account(&ctx, key);

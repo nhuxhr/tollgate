@@ -42,7 +42,8 @@ pub fn ensure_token(
         let creator = Arc::new(Keypair::new());
         let base_mint = Arc::new(Keypair::new());
 
-        ctx.airdrop(&creator.pubkey(), 100).expect("");
+        ctx.airdrop(&creator.pubkey(), 100)
+            .expect("Failed to airdrop SOL");
         let base_mint = Arc::new(ctx.create_spl_token(
             Some(&creator),
             Some(base_mint.insecure_clone()),
@@ -87,7 +88,7 @@ fn test_01_create_tollgate_token() {
     println!("[Tollgate]::Creator: {}", creator.pubkey());
     println!("[Tollgate]::Creator ATA: {}", creator_ata);
 
-    let token = ctx.tokens.get(&key).expect("");
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
     let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
     let pool_params = prepare_pool_creation_params(
         10 * LAMPORTS_PER_SOL,
@@ -95,7 +96,7 @@ fn test_01_create_tollgate_token() {
         MIN_SQRT_PRICE,
         MAX_SQRT_PRICE,
     )
-    .expect("");
+    .expect("Failed to prepare pool creation parameters");
     ctx.send_transaction(
         &[
             create_associated_token_account_idempotent(
@@ -113,7 +114,7 @@ fn test_01_create_tollgate_token() {
                 &spl_token::ID,
                 &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
             )
-            .expect(""),
+            .expect("Failed to sync native token"),
             initialize_pool_ix(
                 get_initialize_pool_ix_accs(
                     &ctx,
@@ -137,7 +138,7 @@ fn test_01_create_tollgate_token() {
         Some(&creator.pubkey()),
         &[&creator, &position_nft_mint],
     )
-    .expect("");
+    .expect("Failed to send transaction");
 
     let investors_rand = rand_investors_num(80..160);
     let mut investors = vec![];
@@ -210,7 +211,10 @@ fn test_01_create_tollgate_token() {
         investors.push(investor);
     }
 
-    ctx.tokens.get_mut(&key).expect("").investors = investors;
+    ctx.tokens
+        .get_mut(&key)
+        .expect("Token not found in context")
+        .investors = investors;
 }
 
 #[test]
@@ -226,7 +230,7 @@ fn test_02_create_coh_token() {
     println!("[Cat On Horse]::Creator: {}", creator.pubkey());
     println!("[Cat On Horse]::Creator ATA: {}", creator_ata);
 
-    let token = ctx.tokens.get(&key).expect("");
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
     let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
     let pool_params = prepare_pool_creation_params(
         4 * LAMPORTS_PER_SOL,
@@ -234,7 +238,7 @@ fn test_02_create_coh_token() {
         MIN_SQRT_PRICE,
         MAX_SQRT_PRICE,
     )
-    .expect("");
+    .expect("Failed to prepare pool creation parameters");
     ctx.send_transaction(
         &[
             create_associated_token_account_idempotent(
@@ -252,7 +256,7 @@ fn test_02_create_coh_token() {
                 &spl_token::ID,
                 &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
             )
-            .expect(""),
+            .expect("Failed to sync native token"),
             initialize_pool_ix(
                 get_initialize_pool_ix_accs(
                     &ctx,
@@ -276,5 +280,5 @@ fn test_02_create_coh_token() {
         Some(&creator.pubkey()),
         &[&creator, &position_nft_mint],
     )
-    .expect("");
+    .expect("Failed to send transaction");
 }
