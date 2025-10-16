@@ -301,7 +301,7 @@ fn shared_crank_logic<'info>(
             if prev_remainder != 0 {
                 let cpi_accounts = token_interface::Transfer {
                     from: ctx.accounts.quote_account.to_account_info(),
-                    to: ctx.accounts.creator_accoount.to_account_info(),
+                    to: ctx.accounts.creator_account.to_account_info(),
                     authority: ctx.accounts.owner.to_account_info(),
                 };
                 let cpi_ctx = CpiContext::new_with_signer(
@@ -514,7 +514,7 @@ fn shared_crank_logic<'info>(
         if creator_share >= ctx.accounts.policy.min_payout_lamports {
             let cpi_accounts = token_interface::Transfer {
                 from: ctx.accounts.quote_account.to_account_info(),
-                to: ctx.accounts.creator_accoount.to_account_info(),
+                to: ctx.accounts.creator_account.to_account_info(),
                 authority: ctx.accounts.owner.to_account_info(),
             };
             let cpi_ctx = CpiContext::new_with_signer(

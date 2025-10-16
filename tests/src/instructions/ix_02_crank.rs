@@ -85,7 +85,7 @@ pub fn get_crank_ix_accs(
         quote_mint,
         base_program: base_mint_acc.owner,
         quote_program: quote_mint_acc.owner,
-        creator_accoount: get_associated_token_address_with_program_id(
+        creator_account: get_associated_token_address_with_program_id(
             &policy_program_acc.creator,
             &quote_mint,
             &quote_mint_acc.owner,

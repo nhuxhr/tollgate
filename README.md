@@ -197,7 +197,7 @@ let crank_accounts = tollgate::accounts::AccountCrank {
     quote_mint: quote_mint_account,
     base_program: base_program_account,
     quote_program: quote_program_account,
-    creator_accoount: creator_accoount,
+    creator_account: creator_account,
     payer: payer_account,
     event_authority: event_authority_account,
     amm_program: damm_v2::ID,

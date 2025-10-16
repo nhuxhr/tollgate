@@ -106,7 +106,7 @@ pub struct AccountCrank<'info> {
         associated_token::authority = policy.creator,
         associated_token::token_program = quote_program,
     )]
-    pub creator_accoount: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
+    pub creator_account: Box<InterfaceAccount<'info, token_interface::TokenAccount>>,
 
     /// The signer account that will pay for the instruction.
     #[account(mut)]
