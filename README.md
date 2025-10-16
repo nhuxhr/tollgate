@@ -176,6 +176,8 @@ There are two variants:
 - For `crank`: Provide pairs of (stream account, investor ATA account). The number of pairs determines the page size.
 - For `crank_with_init`: Provide triplets of (investor pubkey account, stream account, investor ATA account). The number of triplets determines the page size. Investor pubkeys must be readonly and match the stream recipient.
 
+The provided `cursor` + `page_size` (derived from the number of provided account pairs/triplets) must not exceed the `policy.investor_count`. The `investor_count` is fixed at initialization and does not change if additional investors are added post-initialization.
+
 ```rust
 use anchor_client::anchor_lang::prelude::AccountMeta;
 use anchor_spl::associated_token::get_associated_token_address;
@@ -268,36 +270,37 @@ The progress account is used to store the progress state.
 
 The Tollgate program uses the following error codes:
 
-| Code                       | Group                     | Description                                                           |
-| -------------------------- | ------------------------- | --------------------------------------------------------------------- |
-| InvalidPool                | Invalid inputs            | The provided pool is not a valid DAMM v2 pool.                        |
-| InvalidPoolConfig          | Invalid inputs            | The provided pool config is not a valid DAMM v2 pool config.          |
-| InvalidPosition            | Invalid inputs            | The provided position is not a valid DAMM v2 position.                |
-| BaseMintNotInPool          | Invalid inputs            | Base mint not found in the provided pool.                             |
-| QuoteMintNotInPool         | Invalid inputs            | Quote mint not found in the provided pool.                            |
-| BaseAndQuoteMintsAreSame   | Invalid inputs            | Base and quote mints are the same.                                    |
-| InvalidInvestorAccounts    | Invalid inputs            | The investor accounts are invalid.                                    |
-| InvalidInvestorPubkey      | Invalid inputs            | The investor pubkey is invalid.                                       |
-| InvalidInvestorAta         | Invalid inputs            | The investor ATA is invalid.                                          |
-| PoolConfigMismatch         | Mismatched configurations | The provided pool does not match the provided pool config.            |
-| PoolNotQuoteOnlyFees       | Mismatched configurations | The provided pool is not in quote-only fee mode.                      |
-| PoolConfigNotQuoteOnlyFees | Mismatched configurations | The provided pool config is not in quote-only fee mode.               |
-| AMMProgramMismatch         | Mismatched configurations | The provided AMM program does not match the expected DAMM v2 program. |
-| InvalidDayState            | Invalid states            | The day state is invalid.                                             |
-| BaseDenominatedFees        | Invalid states            | Base denominated fees are not allowed.                                |
-| CannotStartNewDay          | Invalid operations        | Cannot start a new day yet.                                           |
-| CannotContinueSameDay      | Invalid operations        | Cannot continue the same day.                                         |
-| CannotCloseDay             | Invalid operations        | Cannot close the day yet.                                             |
-| InvalidInvestors           | Invalid parameters        | The provided investor count is invalid or zero.                       |
-| InvalidInvestorFeeShareBps | Invalid parameters        | The provided investor fee share BPS is invalid or out of range.       |
-| InvalidMinPayoutLamports   | Invalid parameters        | The minimum payout lamports is invalid.                               |
-| InvalidDailyCap            | Invalid parameters        | The daily cap is invalid.                                             |
-| InvalidY0Allocation        | Invalid parameters        | The Y0 allocation is invalid.                                         |
-| PaginationCursorTooSmall   | Invalid parameters        | The pagination cursor is too small.                                   |
-| PaginationCursorTooLarge   | Invalid parameters        | The pagination cursor is too large.                                   |
-| CursorExceedsInvestors     | Invalid parameters        | Cursor exceeds the number of investors.                               |
-| PolicyAlreadyInitialized   | Initialization errors     | The policy account has already been initialized.                      |
-| ProgressAlreadyInitialized | Initialization errors     | The progress account has already been initialized.                    |
+| Code                             | Group                     | Description                                                           |
+| -------------------------------- | ------------------------- | --------------------------------------------------------------------- |
+| InvalidPool                      | Invalid inputs            | The provided pool is not a valid DAMM v2 pool.                        |
+| InvalidPoolConfig                | Invalid inputs            | The provided pool config is not a valid DAMM v2 pool config.          |
+| InvalidPosition                  | Invalid inputs            | The provided position is not a valid DAMM v2 position.                |
+| BaseMintNotInPool                | Invalid inputs            | Base mint not found in the provided pool.                             |
+| QuoteMintNotInPool               | Invalid inputs            | Quote mint not found in the provided pool.                            |
+| BaseAndQuoteMintsAreSame         | Invalid inputs            | Base and quote mints are the same.                                    |
+| InvalidInvestorAccounts          | Invalid inputs            | The investor accounts are invalid.                                    |
+| InvalidInvestorPubkey            | Invalid inputs            | The investor pubkey is invalid.                                       |
+| InvalidInvestorAta               | Invalid inputs            | The investor ATA is invalid.                                          |
+| PoolConfigMismatch               | Mismatched configurations | The provided pool does not match the provided pool config.            |
+| PoolNotQuoteOnlyFees             | Mismatched configurations | The provided pool is not in quote-only fee mode.                      |
+| PoolConfigNotQuoteOnlyFees       | Mismatched configurations | The provided pool config is not in quote-only fee mode.               |
+| AMMProgramMismatch               | Mismatched configurations | The provided AMM program does not match the expected DAMM v2 program. |
+| InvalidDayState                  | Invalid states            | The day state is invalid.                                             |
+| BaseDenominatedFees              | Invalid states            | Base denominated fees are not allowed.                                |
+| CannotStartNewDay                | Invalid operations        | Cannot start a new day yet.                                           |
+| CannotContinueSameDay            | Invalid operations        | Cannot continue the same day.                                         |
+| CannotCloseDay                   | Invalid operations        | Cannot close the day yet.                                             |
+| InvalidInvestors                 | Invalid parameters        | The provided investor count is invalid or zero.                       |
+| InvalidInvestorFeeShareBps       | Invalid parameters        | The provided investor fee share BPS is invalid or out of range.       |
+| InvalidMinPayoutLamports         | Invalid parameters        | The minimum payout lamports is invalid.                               |
+| InvalidDailyCap                  | Invalid parameters        | The daily cap is invalid.                                             |
+| InvalidY0Allocation              | Invalid parameters        | The Y0 allocation is invalid.                                         |
+| PaginationCursorTooSmall         | Invalid parameters        | The pagination cursor is too small.                                   |
+| PaginationCursorTooLarge         | Invalid parameters        | The pagination cursor is too large.                                   |
+| CursorExceedsInvestors           | Invalid parameters        | Cursor exceeds the number of investors.                               |
+| CursorAndPageSizeExceedInvestors | Invalid parameters        | Cursor and page size exceed the number of investors.                  |
+| PolicyAlreadyInitialized         | Initialization errors     | The policy account has already been initialized.                      |
+| ProgressAlreadyInitialized       | Initialization errors     | The progress account has already been initialized.                    |
 
 ## Day and Pagination Semantics
 
@@ -319,7 +322,7 @@ The pagination cursor is used to paginate the investors.
 
 ### Page Size
 
-The page size is dynamically determined by the number of investor account pairs provided in `remaining_accounts` during the crank instruction.
+The page size is dynamically determined by the number of investor account pairs provided in `remaining_accounts` during the crank instruction. The `cursor` + `page_size` must not exceed the fixed `policy.investor_count`.
 
 - **Page Size**: The number of investors to process in the current crank call, based on provided accounts.
 

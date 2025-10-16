@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, ops::Range, sync::Arc, time::SystemTime};
 
 use anchor_client::solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -75,72 +75,13 @@ pub fn ensure_token(
     }
 }
 
-#[test]
-fn test_01_create_tollgate_token() {
-    let mut ctx = TestContext::default();
-    let key = String::from("tollgate");
-    let amount = 1000 * LAMPORTS_PER_SOL;
-    let quote_mint = SOL_MINT;
-    let pool_config = pubkey!("EQbqYxecZuJsVt6g5QbKTWpNWa3QyWQE5NWz5AZBAiNv");
-    let (creator, base_mint, creator_ata) =
-        ensure_token(&mut ctx, key.clone(), amount, pool_config, quote_mint);
-    println!("[Tollgate]::Mint: {}", base_mint.pubkey());
-    println!("[Tollgate]::Creator: {}", creator.pubkey());
-    println!("[Tollgate]::Creator ATA: {}", creator_ata);
+pub fn add_investors(ctx: &mut TestContext, key: &str, num_rng: Range<u32>) -> Vec<Investor> {
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("Token not found in context");
+    let creator = token.creator.insecure_clone();
+    let base_mint = token.base_mint.insecure_clone();
 
-    let token = ctx.tokens.get(&key).expect("Token not found in context");
-    let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
-    let pool_params = prepare_pool_creation_params(
-        10 * LAMPORTS_PER_SOL,
-        10 * LAMPORTS_PER_SOL,
-        MIN_SQRT_PRICE,
-        MAX_SQRT_PRICE,
-    )
-    .expect("Failed to prepare pool creation parameters");
-    ctx.send_transaction(
-        &[
-            create_associated_token_account_idempotent(
-                &creator.pubkey(),
-                &creator.pubkey(),
-                &native_mint::id(),
-                &spl_token::ID,
-            ),
-            system_instruction::transfer(
-                &creator.pubkey(),
-                &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
-                10 * LAMPORTS_PER_SOL,
-            ),
-            spl_token::instruction::sync_native(
-                &spl_token::ID,
-                &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
-            )
-            .expect("Failed to sync native token"),
-            initialize_pool_ix(
-                get_initialize_pool_ix_accs(
-                    &ctx,
-                    creator.pubkey(),
-                    position_nft_mint.pubkey(),
-                    creator.pubkey(),
-                    pool_config,
-                    damm_v2_constants::pool_authority::ID,
-                    base_mint.pubkey(),
-                    quote_mint,
-                ),
-                damm_v2::client::args::InitializePool {
-                    params: damm_v2::types::InitializePoolParameters {
-                        liquidity: pool_params.liquidity_delta,
-                        sqrt_price: pool_params.init_sqrt_price,
-                        activation_point: None,
-                    },
-                },
-            ),
-        ],
-        Some(&creator.pubkey()),
-        &[&creator, &position_nft_mint],
-    )
-    .expect("Failed to send transaction");
-
-    let investors_rand = rand_investors_num(80..160);
+    let investors_rand = rand_investors_num(num_rng);
     let mut investors = vec![];
     for _ in 1..=investors_rand {
         let mut signers = vec![];
@@ -211,6 +152,75 @@ fn test_01_create_tollgate_token() {
         investors.push(investor);
     }
 
+    investors
+}
+
+#[test]
+fn test_01_create_tollgate_token() {
+    let mut ctx = TestContext::default();
+    let key = String::from("tollgate");
+    let amount = 1000 * LAMPORTS_PER_SOL;
+    let quote_mint = SOL_MINT;
+    let pool_config = pubkey!("EQbqYxecZuJsVt6g5QbKTWpNWa3QyWQE5NWz5AZBAiNv");
+    let (creator, base_mint, creator_ata) =
+        ensure_token(&mut ctx, key.clone(), amount, pool_config, quote_mint);
+    println!("[Tollgate]::Mint: {}", base_mint.pubkey());
+    println!("[Tollgate]::Creator: {}", creator.pubkey());
+    println!("[Tollgate]::Creator ATA: {}", creator_ata);
+
+    let token = ctx.tokens.get(&key).expect("Token not found in context");
+    let position_nft_mint = token.pos_mints.get("initial").unwrap().insecure_clone();
+    let pool_params = prepare_pool_creation_params(
+        10 * LAMPORTS_PER_SOL,
+        10 * LAMPORTS_PER_SOL,
+        MIN_SQRT_PRICE,
+        MAX_SQRT_PRICE,
+    )
+    .expect("Failed to prepare pool creation parameters");
+    ctx.send_transaction(
+        &[
+            create_associated_token_account_idempotent(
+                &creator.pubkey(),
+                &creator.pubkey(),
+                &native_mint::id(),
+                &spl_token::ID,
+            ),
+            system_instruction::transfer(
+                &creator.pubkey(),
+                &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
+                10 * LAMPORTS_PER_SOL,
+            ),
+            spl_token::instruction::sync_native(
+                &spl_token::ID,
+                &get_associated_token_address(&creator.pubkey(), &native_mint::ID),
+            )
+            .expect("Failed to sync native token"),
+            initialize_pool_ix(
+                get_initialize_pool_ix_accs(
+                    &ctx,
+                    creator.pubkey(),
+                    position_nft_mint.pubkey(),
+                    creator.pubkey(),
+                    pool_config,
+                    damm_v2_constants::pool_authority::ID,
+                    base_mint.pubkey(),
+                    quote_mint,
+                ),
+                damm_v2::client::args::InitializePool {
+                    params: damm_v2::types::InitializePoolParameters {
+                        liquidity: pool_params.liquidity_delta,
+                        sqrt_price: pool_params.init_sqrt_price,
+                        activation_point: None,
+                    },
+                },
+            ),
+        ],
+        Some(&creator.pubkey()),
+        &[&creator, &position_nft_mint],
+    )
+    .expect("Failed to send transaction");
+
+    let investors = add_investors(&mut ctx, key.as_str(), 80..160);
     ctx.tokens
         .get_mut(&key)
         .expect("Token not found in context")

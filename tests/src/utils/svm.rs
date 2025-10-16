@@ -393,6 +393,29 @@ pub fn demand_instruction_error(expected_error: InstructionError, result: &Trans
     }
 }
 
+pub fn demand_instruction_one_of_errors(
+    expected_errors: Vec<InstructionError>,
+    result: &TransactionResult,
+) {
+    let Err(e) = result else {
+        panic!(
+            "Expected one of {:?} but transaction succeeded",
+            expected_errors
+        );
+    };
+
+    let TransactionError::InstructionError(_, observed_error) = &e.err else {
+        panic!("Expected one of {:?} but got: {}", expected_errors, e.err);
+    };
+
+    if !expected_errors.contains(observed_error) {
+        panic!(
+            "Expected one of {:?} but got {}",
+            expected_errors, observed_error
+        );
+    }
+}
+
 pub fn demand_transaction_error(expected: TransactionError, result: &TransactionResult) {
     let Err(e) = result else {
         panic!("Expected {} but transaction succeeded", expected);

@@ -24,14 +24,19 @@ use tollgate::{
     state::Policy,
 };
 
-use crate::utils::{
-    damm_v2::{
-        get_pool_with_config_pda, get_position_nft_account_pda, get_position_pda,
-        get_token_vault_pda, set_damm_v2_position_fees,
-    },
-    find_program_address, find_program_event_authority, log_policy_account, log_progress_account,
-    svm::{
-        demand_instruction_error, demand_logs_contain, get_ix_err, get_payer, TestContext, Token,
+use crate::{
+    instructions::ix_00_setup::add_investors,
+    utils::{
+        damm_v2::{
+            get_pool_with_config_pda, get_position_nft_account_pda, get_position_pda,
+            get_token_vault_pda, set_damm_v2_position_fees,
+        },
+        find_program_address, find_program_event_authority, log_policy_account,
+        log_progress_account,
+        svm::{
+            demand_instruction_error, demand_instruction_one_of_errors, demand_logs_contain,
+            get_ix_err, get_payer, TestContext, Token,
+        },
     },
 };
 
@@ -681,6 +686,104 @@ fn test_12_crank_day_three_full() {
         demand_logs_contain("Crank::Distributable amount after carry: ", &result);
         result.expect("Crank day three full should succeed");
     }
+
+    log_progress_account(&ctx, key);
+}
+
+#[test]
+fn test_13_crank_day_four_full_with_more_investor() {
+    let mut ctx = TestContext::default();
+    let key = "tollgate";
+    let pos_key = "initialize";
+    let payer = get_payer();
+    let quote_fee = LAMPORTS_PER_SOL / 4;
+
+    ctx.time_travel_by_secs(TWENTY_FOUR_HOURS as u64);
+    set_damm_v2_position_fees(&mut ctx, key, pos_key, Some(0), Some(quote_fee));
+
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("Token not found in context");
+    let investor_count = token.investors.len();
+
+    let new_investors = add_investors(&mut ctx, key, 2..5);
+    ctx.tokens
+        .get_mut(key)
+        .expect("Token not found in context")
+        .investors
+        .extend(new_investors.clone());
+
+    let tokens = ctx.tokens.clone();
+    let token = tokens.get(key).expect("Token not found in context");
+    let investors = token.investors.chunks(10);
+
+    for (idx, chunk) in investors.clone().enumerate() {
+        let len = chunk.len();
+        let start_page = if idx + 1 == investors.len() {
+            (investors.len() - 1) * 10
+        } else {
+            idx * len
+        };
+        let end_page = start_page + len;
+
+        let (_, accs) = compute_crank_ix_accs(
+            &ctx,
+            key,
+            pos_key,
+            true,
+            payer.pubkey(),
+            start_page as u32,
+            end_page as u32,
+        );
+
+        let result = ctx.send_transaction(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(1_000_000),
+                crank_with_init_ix(
+                    accs.0,
+                    tollgate::instruction::CrankWithInit {
+                        params: tollgate::instructions::CrankParams {
+                            cursor: start_page as u32,
+                        },
+                    },
+                    accs.1,
+                ),
+            ],
+            Some(&payer.pubkey()),
+            &[payer],
+        );
+
+        if start_page.saturating_add(len) > investor_count {
+            demand_instruction_one_of_errors(
+                vec![
+                    get_ix_err(TollgateError::CursorExceedsInvestors),
+                    get_ix_err(TollgateError::CursorAndPageSizeExceedInvestors),
+                ],
+                &result,
+            );
+        } else {
+            demand_logs_contain(
+                format!(
+                    "Crank::Starting crank with cursor={} and page_size={}",
+                    start_page, len
+                )
+                .as_str(),
+                &result,
+            );
+            if idx == 0 {
+                demand_logs_contain("Crank::Processing day state: New", &result);
+            } else {
+                demand_logs_contain("Crank::Processing day state: Same", &result);
+            }
+            demand_logs_contain("Crank::Distributable amount after carry: ", &result);
+            result.expect("Crank day three full should succeed");
+        }
+    }
+
+    ctx.tokens
+        .get_mut(key)
+        .expect("Token not found in context")
+        .investors
+        .truncate(investor_count);
 
     log_progress_account(&ctx, key);
 }

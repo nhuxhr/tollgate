@@ -21,11 +21,17 @@ pub struct CrankParams {
 }
 
 impl CrankParams {
-    pub fn assert(&self, investors: u32) -> Result<()> {
+    pub fn assert(&self, investors: u32, page_size: u32) -> Result<()> {
         // assert cursor is not excessively investors
         require!(
             self.cursor < investors,
             TollgateError::CursorExceedsInvestors
+        );
+        // assert cursor + page_size is not greater than investors
+        require_gte!(
+            investors,
+            self.cursor.saturating_add(page_size),
+            TollgateError::CursorAndPageSizeExceedInvestors
         );
         Ok(())
     }
@@ -278,7 +284,7 @@ fn shared_crank_logic<'info>(
     );
 
     // Validate params
-    params.assert(ctx.accounts.policy.investor_count)?;
+    params.assert(ctx.accounts.policy.investor_count, page_size as u32)?;
 
     let vault_seeds = &[
         VAULT_SEED,
