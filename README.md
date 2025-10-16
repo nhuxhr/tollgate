@@ -95,28 +95,30 @@ The `initialize` instruction is used to initialize the policy and progress accou
 | `system_program`       | -                                   | The system program account.                                                      |
 
 ```rust
-// Initialize the policy and progress accounts, and create a DAMM v2 position
-let initialize_instruction = Instruction::new_with_borsh(
-    tollgate::ID,
-    &tollgate::accounts::AccountInitialize {
-        vault: vault_account,
-        policy: policy_account,
-        progress: progress_account,
-        pool: pool_account,
-        pool_cfg: pool_cfg_account,
-        position_nft_mint: position_nft_mint_account,
-        position_nft_account: position_nft_account,
-        position: position_account,
-        pool_authority: pool_authority_account,
-        owner: owner_account,
-        quote_mint: quote_mint_account,
-        payer: payer_account,
-        event_authority: event_authority_account,
-        amm_program: amm_program_account,
-        token_2022_program: token_2022_program_account,
-        system_program: system_program_account,
-   },
-    tollgate::instruction::InitializeParams {
+use anchor_client::anchor_lang::ToAccountMetas;
+use solana_sdk::instruction::Instruction;
+
+let initialize_accounts = tollgate::accounts::AccountInitialize {
+    vault: vault_account,
+    policy: policy_account,
+    progress: progress_account,
+    pool: pool_account,
+    pool_cfg: pool_cfg_account,
+    position_nft_mint: position_nft_mint_account,
+    position_nft_account: position_nft_account,
+    position: position_account,
+    pool_authority: pool_authority_account,
+    owner: owner_account,
+    quote_mint: quote_mint_account,
+    payer: payer_account,
+    event_authority: event_authority_account,
+    amm_program: damm_v2::ID,
+    token_2022_program: token_2022::ID,
+    system_program: system_program::ID,
+};
+
+let initialize_args = tollgate::instruction::Initialize {
+    params: tollgate::instructions::InitializeParams {
         investor_count: 100,
         init_investor_ata: true,
         investor_fee_share_bps: 5000,
@@ -124,6 +126,11 @@ let initialize_instruction = Instruction::new_with_borsh(
         daily_cap: Some(10000000),
         y0: 100000,
     },
+};
+let initialize_instruction = Instruction::new_with_bytes(
+    tollgate::ID,
+    &initialize_args.data(),
+    initialize_accounts.to_account_metas(None),
 );
 ```
 
@@ -170,40 +177,54 @@ There are two variants:
 - For `crank_with_init`: Provide triplets of (investor pubkey account, stream account, investor ATA account). The number of triplets determines the page size. Investor pubkeys must be readonly and match the stream recipient.
 
 ```rust
-// Crank the daily distribution (standard mode)
-let crank_instruction = Instruction::new_with_borsh(
+use anchor_client::anchor_lang::prelude::AccountMeta;
+use anchor_spl::associated_token::get_associated_token_address;
+use solana_sdk::instruction::Instruction;
+
+let crank_accounts = tollgate::accounts::AccountCrank {
+    policy: policy_account,
+    progress: progress_account,
+    pool: pool_account,
+    position_nft_account: position_nft_account,
+    position: position_account,
+    pool_authority: pool_authority_account,
+    owner: owner_account,
+    base_account: base_account,
+    quote_account: quote_account,
+    base_vault: base_vault_account,
+    quote_vault: quote_vault_account,
+    base_mint: base_mint_account,
+    quote_mint: quote_mint_account,
+    base_program: base_program_account,
+    quote_program: quote_program_account,
+    creator_accoount: creator_accoount,
+    payer: payer_account,
+    event_authority: event_authority_account,
+    amm_program: damm_v2::ID,
+    associated_token_program: associated_token::ID,
+    system_program: system_program::ID,
+};
+
+// Prepare remaining accounts for standard crank (pairs: stream, investor_ata)
+let mut remaining_accounts = vec![];
+for i in 0..page_size {
+    remaining_accounts.push(AccountMeta::new_readonly(stream_accounts[i], false));
+    remaining_accounts.push(AccountMeta::new(investor_ata_accounts[i], false));
+}
+
+let crank_args = tollgate::instruction::Crank {
+    params: tollgate::instructions::CrankParams { cursor: 0 },
+};
+let mut crank_account_metas = crank_accounts.to_account_metas(None);
+crank_account_metas.extend(remaining_accounts);
+let crank_instruction = Instruction::new_with_bytes(
     tollgate::ID,
-    &tollgate::accounts::AccountCrank {
-        policy: policy_account,
-        progress: progress_account,
-        pool: pool_account,
-        position_nft_account: position_nft_account,
-        position: position_account,
-        pool_authority: pool_authority_account,
-        owner: owner_account,
-        treasury: treasury_account,
-        base_account: base_account,
-        quote_account: quote_account,
-        base_vault: base_vault_account,
-        quote_vault: quote_vault_account,
-        base_mint: base_mint_account,
-        quote_mint: quote_mint_account,
-        base_program: base_program_account,
-        quote_program: quote_program_account,
-        creator_account: creator_account,
-        payer: payer_account,
-        event_authority: event_authority_account,
-        amm_program: amm_program_account,
-        associated_token_program: associated_token_program_account,
-        system_program: system_program_account,
-    },
-    tollgate::instruction::CrankParams {
-        cursor: 0,
-    },
+    &crank_args.data(),
+    crank_account_metas,
 );
 
-// For crank_with_init, use tollgate::instruction::CrankWithInit instead of Crank
-// and provide triplets in remaining_accounts.
+// For crank_with_init, use tollgate::instruction::CrankWithInit for args
+// and provide triplets in remaining_accounts: (investor_pubkey, stream, investor_ata).
 ```
 
 ## Account Structures
